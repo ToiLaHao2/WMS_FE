@@ -1,4 +1,3 @@
-import React from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import MainLayout from './layout/MainLayout';
 import OnboardingPage from './features/onboarding/OnboardingPage';

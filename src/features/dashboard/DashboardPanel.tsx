@@ -1,18 +1,21 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useSimulationStore } from '../../store/useSimulationStore';
 import { PackagePlus, PackageMinus, Activity, Battery, BatteryCharging, History } from 'lucide-react';
+import ImportModal from './modals/ImportModal';
+import ExportModal from './modals/ExportModal';
 
 const DashboardPanel: React.FC = () => {
-  const { stats, agvs, logs, importGoods, exportGoods, addLog } = useSimulationStore();
+  const { stats, agvs, logs, inventory } = useSimulationStore();
+  
+  const [isImportOpen, setIsImportOpen] = useState(false);
+  const [isExportOpen, setIsExportOpen] = useState(false);
 
   const handleImport = () => {
-    importGoods(50);
-    addLog('Imported 50 units of goods', 'success');
+    setIsImportOpen(true);
   };
 
   const handleExport = () => {
-    exportGoods(30);
-    addLog('Exported 30 units of goods', 'info');
+    setIsExportOpen(true);
   };
 
   return (
@@ -99,30 +102,62 @@ const DashboardPanel: React.FC = () => {
           </div>
         </section>
 
+        {/* Inventory List */}
+        <section className="space-y-3">
+          <h3 className="text-sm font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-2">
+            <PackagePlus size={16} /> Inventory ({inventory.length})
+          </h3>
+          <div className="space-y-2 max-h-[300px] overflow-y-auto pr-1 scrollbar-thin scrollbar-thumb-slate-700">
+            {inventory.length === 0 ? (
+              <p className="text-xs text-slate-500 italic py-2">No items in warehouse.</p>
+            ) : (
+              inventory.map((item) => (
+                <div key={item.id} className="bg-slate-900/40 p-3 rounded-lg border border-slate-700/50 flex flex-col gap-1 hover:border-slate-600 transition-colors">
+                  <div className="flex justify-between items-center">
+                    <span className="font-bold text-xs text-emerald-400 font-mono">{item.id}</span>
+                    <span className="text-[10px] bg-slate-800 px-2 py-0.5 rounded border border-slate-600 text-slate-400">
+                      Slot: {item.slotId}
+                    </span>
+                  </div>
+                  <p className="text-sm text-slate-200 font-medium">{item.name}</p>
+                  <div className="flex gap-3 text-[10px] text-slate-500">
+                    <span>Size: {item.size}</span>
+                    <span>Weight: {item.weight}kg</span>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </section>
+
         {/* Logs */}
         <section className="space-y-3">
           <h3 className="text-sm font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-2">
             <History size={16} /> Activity Logs
           </h3>
           <div className="space-y-2 text-sm">
-            {logs.slice(0, 5).map((log) => (
+            {logs.slice(0, 8).map((log) => (
               <div key={log.id} className="flex flex-col gap-1 py-2 border-b border-slate-700/50 last:border-0">
                 <div className="flex items-center gap-2">
                   <span className="text-xs text-slate-500">{log.time}</span>
                   <span
-                    className={`w-2 h-2 rounded-full ${
+                    className={`w-1.5 h-1.5 rounded-full ${
                       log.type === 'info' ? 'bg-blue-400' :
                       log.type === 'success' ? 'bg-emerald-400' :
+                      log.type === 'error' ? 'bg-rose-400' :
                       'bg-amber-400'
                     }`}
                   />
                 </div>
-                <p className="text-slate-300 pl-4">{log.message}</p>
+                <p className="text-slate-300 pl-3 leading-tight">{log.message}</p>
               </div>
             ))}
           </div>
         </section>
       </div>
+
+      {isImportOpen && <ImportModal onClose={() => setIsImportOpen(false)} />}
+      {isExportOpen && <ExportModal onClose={() => setIsExportOpen(false)} />}
     </div>
   );
 };

@@ -38,6 +38,7 @@ export interface InventoryItem {
   size: number;
   weight: number;
   description: string;
+  slotId?: string; // The ID of the storage slot where this item is located
 }
 
 interface SimulationState {
@@ -99,16 +100,31 @@ export const useSimulationStore = create<SimulationState>((set, get) => ({
   },
 
   importGoods: (item) => {
+    const state = get();
     const itemId = `ITEM-${generateId()}`;
-    const newItem = { ...item, id: itemId };
+    const randomSlot = `S${Math.floor(Math.random() * 50) + 1}`;
+    const newItem = { ...item, id: itemId, slotId: randomSlot };
     
+    // Assign task to first idle AGV
+    const idleAgv = state.agvs.find(a => a.status === 'idle');
+    if (idleAgv) {
+      state.updateAGVStatus(idleAgv.id, { 
+        status: 'moving', 
+        currentTask: `Importing ${itemId} to ${randomSlot}` 
+      });
+      // Simulate task completion after 5 seconds
+      setTimeout(() => {
+        state.updateAGVStatus(idleAgv.id, { status: 'idle', currentTask: null });
+      }, 5000);
+    }
+
     set((state) => {
       const newUsed = Math.min(state.stats.usedCapacity + item.size, state.stats.totalCapacity);
       return {
         inventory: [...state.inventory, newItem],
         stats: { ...state.stats, usedCapacity: newUsed },
         logs: [
-          { id: generateId(), time: new Date().toLocaleTimeString(), message: `Nhập thành công hàng: ${item.name} (ID: ${itemId})`, type: 'success' },
+          { id: generateId(), time: new Date().toLocaleTimeString(), message: `Nhập thành công hàng: ${item.name} (ID: ${itemId}) vào ô ${randomSlot}`, type: 'success' as LogType },
           ...state.logs,
         ].slice(0, 50)
       };
@@ -127,6 +143,18 @@ export const useSimulationStore = create<SimulationState>((set, get) => ({
     }
     
     const itemToExport = state.inventory[itemIndex];
+
+    // Assign task to first idle AGV
+    const idleAgv = state.agvs.find(a => a.status === 'idle');
+    if (idleAgv) {
+      state.updateAGVStatus(idleAgv.id, { 
+        status: 'moving', 
+        currentTask: `Exporting ${itemId} from ${itemToExport.slotId}` 
+      });
+      setTimeout(() => {
+        state.updateAGVStatus(idleAgv.id, { status: 'idle', currentTask: null });
+      }, 5000);
+    }
     
     set((state) => {
       const newInventory = [...state.inventory];
@@ -137,7 +165,7 @@ export const useSimulationStore = create<SimulationState>((set, get) => ({
         inventory: newInventory,
         stats: { ...state.stats, usedCapacity: newUsed },
         logs: [
-          { id: generateId(), time: new Date().toLocaleTimeString(), message: `Đã xuất kho: ${itemToExport.name} (ID: ${itemToExport.id})`, type: 'info' },
+          { id: generateId(), time: new Date().toLocaleTimeString(), message: `Đã xuất kho: ${itemToExport.name} (ID: ${itemToExport.id})`, type: 'info' as LogType },
           ...state.logs,
         ].slice(0, 50)
       };
@@ -155,7 +183,7 @@ export const useSimulationStore = create<SimulationState>((set, get) => ({
       stats: { totalCapacity: 10000, usedCapacity: 6500, pendingOrders: 12 },
       agvs: [
         { id: 'AGV-01', status: 'moving', battery: 85, x: 5, y: 3, currentTask: 'Moving to Shelf A' },
-        { id: 'AGV-02', status: 'idle', battery: 100, x: 1, y: 1, currentTask: null },
+        { id: 'AGV-02', status: 'charging', battery: 20, x: 1, y: 1, currentTask: 'Charging...' },
       ],
       inventory: [],
       logs: [{ id: generateId(), time: new Date().toLocaleTimeString(), message: `Loaded warehouse ${id}.`, type: 'success' }]
