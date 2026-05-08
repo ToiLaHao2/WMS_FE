@@ -3,28 +3,98 @@ import { useSimulationStore } from '../../store/useSimulationStore';
 import { Box, Factory, LogIn, Plus } from 'lucide-react';
 
 const OnboardingPage: React.FC = () => {
-  const { loadWarehouse, createWarehouse } = useSimulationStore();
+  const { 
+    loadWarehouse, 
+    createWarehouse, 
+    lastError, 
+    clearError, 
+    availableWarehouses, 
+    fetchAvailableWarehouses 
+  } = useSimulationStore();
   const [tab, setTab] = useState<'load' | 'create'>('load');
   
-  const [warehouseId, setWarehouseId] = useState('');
-  const [config, setConfig] = useState({
-    width: 1000,
-    height: 800,
+  // Structured Form States
+  const [loadForm, setLoadForm] = useState({ targetCode: '' });
+  const [createForm, setCreateForm] = useState({
+    code: '', // Manual code if desired, or auto-gen
+    width: 30,
+    height: 20,
     layoutType: 'standard',
+    agvCount: 0
   });
-  const [initialAgvCount, setInitialAgvCount] = useState(0);
 
-  const handleLoad = (e: React.FormEvent) => {
+  const [searchStatus, setSearchStatus] = useState<'idle' | 'checking' | 'taken' | 'available'>('idle');
+
+  // 1. Instant Local Filter (Derived State)
+  const filteredWarehouses = React.useMemo(() => {
+    return availableWarehouses.filter(wh => 
+      wh.code.toLowerCase().includes(loadForm.targetCode.toLowerCase())
+    );
+  }, [availableWarehouses, loadForm.targetCode]);
+
+  // 2. Debounced Remote Check (Redis-style)
+  React.useEffect(() => {
+    const code = loadForm.targetCode;
+    if (!code || code.length < 3) {
+      setSearchStatus('idle');
+      return;
+    }
+
+    // Check locally first
+    const existsLocally = availableWarehouses.some(wh => wh.code === code);
+    if (existsLocally) {
+      setSearchStatus('taken');
+      return;
+    }
+
+    const timer = setTimeout(async () => {
+      setSearchStatus('checking');
+      try {
+        const res = await fetch(`http://localhost:3000/api/master-data/warehouses/check/${code}`);
+        const { exists } = await res.json();
+        setSearchStatus(exists ? 'taken' : 'available');
+      } catch (err) {
+        setSearchStatus('idle');
+      }
+    }, 500);
+
+    return () => clearTimeout(timer);
+  }, [loadForm.targetCode, availableWarehouses]);
+
+  // Fetch warehouses on mount
+  React.useEffect(() => {
+    fetchAvailableWarehouses();
+  }, [fetchAvailableWarehouses]);
+
+  // Clear error ONLY when switching between tabs
+  const prevTab = React.useRef(tab);
+  React.useEffect(() => {
+    if (prevTab.current !== tab) {
+      clearError();
+      prevTab.current = tab;
+    }
+  }, [tab, clearError]);
+
+  const handleLoad = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (warehouseId.trim()) {
-      loadWarehouse(warehouseId.trim());
+    if (loadForm.targetCode.trim()) {
+      try {
+        await loadWarehouse(loadForm.targetCode.trim());
+      } catch (err: any) {
+        // Error is now handled via store's lastError
+      }
     }
   };
 
-  const handleCreate = (e: React.FormEvent) => {
+  const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (config.width > 0 && config.height > 0 && initialAgvCount >= 0) {
-      createWarehouse(config, initialAgvCount);
+    const { width, height, agvCount } = createForm;
+    if (width > 0 && height > 0 && agvCount >= 0) {
+      try {
+        await createWarehouse(createForm, createForm.agvCount);
+      } catch (err: any) {
+        // Error is now handled via store's lastError
+      }
     }
   };
 
@@ -80,42 +150,106 @@ const OnboardingPage: React.FC = () => {
             {tab === 'load' ? (
               <form onSubmit={handleLoad} className="space-y-6 animate-in fade-in slide-in-from-right-4 duration-300">
                 <div className="space-y-2">
-                  <label className="text-sm font-medium text-slate-300">Warehouse ID</label>
+                  <div className="flex items-center justify-between">
+                    <label className="text-sm font-medium text-slate-300">Warehouse ID</label>
+                    {searchStatus !== 'idle' && (
+                      <span className={`text-[10px] font-bold uppercase tracking-widest flex items-center gap-1 ${
+                        searchStatus === 'checking' ? 'text-slate-500' :
+                        searchStatus === 'taken' ? 'text-amber-500' : 'text-emerald-500'
+                      }`}>
+                        {searchStatus === 'checking' && <span className="w-2 h-2 rounded-full bg-slate-500 animate-pulse" />}
+                        {searchStatus === 'taken' && <Box size={10} />}
+                        {searchStatus === 'available' && <Plus size={10} />}
+                        {searchStatus}
+                      </span>
+                    )}
+                  </div>
                   <input
                     type="text"
-                    value={warehouseId}
-                    onChange={(e) => setWarehouseId(e.target.value)}
+                    value={loadForm.targetCode}
+                    onChange={(e) => setLoadForm({ ...loadForm, targetCode: e.target.value })}
                     placeholder="e.g. WH-XYZ123"
-                    className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-3 text-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all"
+                    className={`w-full bg-slate-900 border rounded-lg px-4 py-3 text-slate-200 focus:outline-none focus:ring-2 transition-all ${
+                      searchStatus === 'taken' ? 'border-amber-500/50 focus:ring-amber-500' :
+                      searchStatus === 'available' ? 'border-emerald-500/50 focus:ring-emerald-500' :
+                      'border-slate-700 focus:ring-emerald-500'
+                    }`}
                     required
                   />
                 </div>
+                {lastError && (
+                  <div className="bg-red-500/10 border border-red-500/50 text-red-400 text-sm p-3 rounded-lg animate-in shake duration-300">
+                    {lastError}
+                  </div>
+                )}
                 <button
                   type="submit"
                   className="w-full flex items-center justify-center gap-2 bg-emerald-500 hover:bg-emerald-600 text-white font-medium py-3 px-4 rounded-lg transition-colors shadow-lg shadow-emerald-500/20"
                 >
                   <LogIn size={20} /> Connect to Warehouse
                 </button>
+
+                {availableWarehouses.length > 0 && (
+                  <div className="pt-4 border-t border-slate-800">
+                    <div className="flex items-center justify-between mb-3">
+                      <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider block">
+                        {loadForm.targetCode ? `Search Results (${filteredWarehouses.length})` : 'Existing Warehouses'}
+                      </label>
+                      {loadForm.targetCode && filteredWarehouses.length === 0 && (
+                        <span className="text-[10px] text-slate-600 italic">No local matches</span>
+                      )}
+                    </div>
+                    <div className="grid grid-cols-1 gap-2 max-h-[200px] overflow-y-auto pr-2 custom-scrollbar">
+                      {filteredWarehouses.map((wh) => (
+                        <button
+                          key={wh.id}
+                          type="button"
+                          onClick={() => setLoadForm({ targetCode: wh.code })}
+                          className={`flex items-center justify-between p-3 rounded-lg border transition-all text-left group ${
+                            loadForm.targetCode === wh.code 
+                              ? 'bg-emerald-500/10 border-emerald-500/50 text-emerald-400' 
+                              : 'bg-slate-900/50 border-slate-700 hover:border-slate-500 text-slate-400'
+                          }`}
+                        >
+                          <div className="flex items-center gap-3">
+                            <div className={`p-2 rounded-md ${loadForm.targetCode === wh.code ? 'bg-emerald-500 text-white' : 'bg-slate-800 group-hover:bg-slate-700'}`}>
+                              <Box size={16} />
+                            </div>
+                            <div>
+                              <div className="font-medium text-sm">{wh.code}</div>
+                              <div className="text-[10px] text-slate-500 uppercase tracking-tight">{wh.width}x{wh.height} Grid</div>
+                            </div>
+                          </div>
+                          {loadForm.targetCode === wh.code && <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </form>
             ) : (
               <form onSubmit={handleCreate} className="space-y-6 animate-in fade-in slide-in-from-left-4 duration-300">
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
-                    <label className="text-sm font-medium text-slate-300">Width (m)</label>
+                    <label className="text-sm font-medium text-slate-300">Columns (Grid Width)</label>
                     <input
                       type="number"
-                      value={config.width}
-                      onChange={(e) => setConfig({ ...config, width: Number(e.target.value) })}
+                      min="10"
+                      max="200"
+                      value={createForm.width}
+                      onChange={(e) => setCreateForm({ ...createForm, width: Number(e.target.value) })}
                       className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-3 text-slate-200 focus:outline-none focus:ring-2 focus:ring-cyan-500"
                       required
                     />
                   </div>
                   <div className="space-y-2">
-                    <label className="text-sm font-medium text-slate-300">Height (m)</label>
+                    <label className="text-sm font-medium text-slate-300">Rows (Grid Height)</label>
                     <input
                       type="number"
-                      value={config.height}
-                      onChange={(e) => setConfig({ ...config, height: Number(e.target.value) })}
+                      min="10"
+                      max="200"
+                      value={createForm.height}
+                      onChange={(e) => setCreateForm({ ...createForm, height: Number(e.target.value) })}
                       className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-3 text-slate-200 focus:outline-none focus:ring-2 focus:ring-cyan-500"
                       required
                     />
@@ -125,8 +259,8 @@ const OnboardingPage: React.FC = () => {
                 <div className="space-y-2">
                   <label className="text-sm font-medium text-slate-300">Layout Pattern</label>
                   <select
-                    value={config.layoutType}
-                    onChange={(e) => setConfig({ ...config, layoutType: e.target.value })}
+                    value={createForm.layoutType}
+                    onChange={(e) => setCreateForm({ ...createForm, layoutType: e.target.value })}
                     className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-3 text-slate-200 focus:outline-none focus:ring-2 focus:ring-cyan-500"
                   >
                     <option value="standard">Standard Aisles</option>
@@ -140,14 +274,19 @@ const OnboardingPage: React.FC = () => {
                   <input
                     type="number"
                     min="0"
-                    value={initialAgvCount}
-                    onChange={(e) => setInitialAgvCount(Math.max(0, parseInt(e.target.value) || 0))}
+                    value={createForm.agvCount}
+                    onChange={(e) => setCreateForm({ ...createForm, agvCount: Math.max(0, parseInt(e.target.value) || 0) })}
                     className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-3 text-slate-200 focus:outline-none focus:ring-2 focus:ring-cyan-500"
                     required
                   />
                   <p className="text-xs text-slate-500">Number of AGVs to initialize the simulation with (can be 0).</p>
                 </div>
 
+                {lastError && (
+                  <div className="bg-red-500/10 border border-red-500/50 text-red-400 text-sm p-3 rounded-lg animate-in shake duration-300">
+                    {lastError}
+                  </div>
+                )}
                 <button
                   type="submit"
                   className="w-full flex items-center justify-center gap-2 bg-cyan-500 hover:bg-cyan-600 text-white font-medium py-3 px-4 rounded-lg transition-colors shadow-lg shadow-cyan-500/20"

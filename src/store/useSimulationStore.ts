@@ -27,8 +27,9 @@ export interface WarehouseStats {
 
 export interface WarehouseConfig {
   id: string | null;
-  width: number;
-  height: number;
+  code: string | null;
+  width: number;   // cols (grid cells)
+  height: number;  // rows (grid cells)
   layoutType: string;
 }
 
@@ -38,8 +39,24 @@ export interface InventoryItem {
   size: number;
   weight: number;
   description: string;
-  slotId?: string; // The ID of the storage slot where this item is located
+  slotId?: string;
 }
+
+export interface SlotData {
+  id: string;
+  slot_code: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  slot_type: 'STORAGE' | 'AISLE' | 'BLOCKED' | 'PICKUP' | 'DROPOFF' | 'CHARGING';
+  status: string;
+  metadata?: any;
+}
+
+// Grid cell values (match backend)
+// 0=AISLE, 1=STORAGE, 2=BLOCKED(wall), 3=CHARGING
+export type LayoutGrid = number[][];
 
 interface SimulationState {
   appStatus: AppStatus;
@@ -48,26 +65,36 @@ interface SimulationState {
   agvs: AGVData[];
   logs: LogEntry[];
   inventory: InventoryItem[];
-  
+  slots: SlotData[];
+  layoutGrid: LayoutGrid | null;  // Static map matrix from backend
+  availableWarehouses: any[]; // List for selection
+  lastError: string | null;
+
   // Actions
   addLog: (message: string, type: LogType) => void;
   updateAGVStatus: (id: string, updates: Partial<AGVData>) => void;
-  
+  clearError: () => void;
+
   // Logic
   checkImportFeasibility: (size: number) => boolean;
-  importGoods: (item: Omit<InventoryItem, 'id'>) => string; // returns generated ID
-  exportGoods: (itemId: string) => boolean; // returns true if successful
-  
+  importGoods: (item: Omit<InventoryItem, 'id'>) => string;
+  exportGoods: (itemId: string) => boolean;
+
   loadWarehouse: (id: string) => Promise<void>;
-  createWarehouse: (config: Omit<WarehouseConfig, 'id'>, initialAgvCount: number) => Promise<void>;
+  createWarehouse: (config: Omit<WarehouseConfig, 'id' | 'code'>, initialAgvCount: number) => Promise<void>;
+  fetchAvailableWarehouses: () => Promise<void>;
+  resetSimulation: () => void;
 }
 
 export const generateId = () => Math.random().toString(36).substring(2, 9).toUpperCase();
+
+const API_BASE = 'http://localhost:3000/api/master-data';
 
 export const useSimulationStore = create<SimulationState>((set, get) => ({
   appStatus: 'setup',
   warehouseConfig: {
     id: null,
+    code: null,
     width: 0,
     height: 0,
     layoutType: 'standard',
@@ -80,6 +107,10 @@ export const useSimulationStore = create<SimulationState>((set, get) => ({
   agvs: [],
   logs: [],
   inventory: [],
+  slots: [],
+  layoutGrid: null,
+  availableWarehouses: [],
+  lastError: null,
 
   addLog: (message, type) =>
     set((state) => ({
@@ -88,6 +119,8 @@ export const useSimulationStore = create<SimulationState>((set, get) => ({
         ...state.logs,
       ].slice(0, 50),
     })),
+
+  clearError: () => set({ lastError: null }),
 
   updateAGVStatus: (id, updates) =>
     set((state) => ({
@@ -102,17 +135,20 @@ export const useSimulationStore = create<SimulationState>((set, get) => ({
   importGoods: (item) => {
     const state = get();
     const itemId = `ITEM-${generateId()}`;
-    const randomSlot = `S${Math.floor(Math.random() * 50) + 1}`;
-    const newItem = { ...item, id: itemId, slotId: randomSlot };
-    
-    // Assign task to first idle AGV
+    // Pick a random STORAGE slot from the slots array
+    const storageSlots = state.slots.filter(s => s.slot_type === 'STORAGE' && s.status === 'AVAILABLE');
+    const targetSlot = storageSlots.length > 0
+      ? storageSlots[Math.floor(Math.random() * storageSlots.length)]
+      : null;
+    const slotCode = targetSlot?.slot_code || 'UNKNOWN';
+    const newItem = { ...item, id: itemId, slotId: slotCode };
+
     const idleAgv = state.agvs.find(a => a.status === 'idle');
     if (idleAgv) {
-      state.updateAGVStatus(idleAgv.id, { 
-        status: 'moving', 
-        currentTask: `Importing ${itemId} to ${randomSlot}` 
+      state.updateAGVStatus(idleAgv.id, {
+        status: 'moving',
+        currentTask: `Importing ${itemId} to ${slotCode}`
       });
-      // Simulate task completion after 5 seconds
       setTimeout(() => {
         state.updateAGVStatus(idleAgv.id, { status: 'idle', currentTask: null });
       }, 5000);
@@ -124,42 +160,41 @@ export const useSimulationStore = create<SimulationState>((set, get) => ({
         inventory: [...state.inventory, newItem],
         stats: { ...state.stats, usedCapacity: newUsed },
         logs: [
-          { id: generateId(), time: new Date().toLocaleTimeString(), message: `Nhập thành công hàng: ${item.name} (ID: ${itemId}) vào ô ${randomSlot}`, type: 'success' as LogType },
+          { id: generateId(), time: new Date().toLocaleTimeString(), message: `Nhập thành công hàng: ${item.name} (ID: ${itemId}) vào ô ${slotCode}`, type: 'success' as LogType },
           ...state.logs,
         ].slice(0, 50)
       };
     });
-    
+
     return itemId;
   },
 
   exportGoods: (itemId) => {
     const state = get();
     const itemIndex = state.inventory.findIndex(i => i.id === itemId);
-    
+
     if (itemIndex === -1) {
       state.addLog(`Xuất hàng thất bại: Không tìm thấy ID ${itemId}`, 'error');
       return false;
     }
-    
+
     const itemToExport = state.inventory[itemIndex];
 
-    // Assign task to first idle AGV
     const idleAgv = state.agvs.find(a => a.status === 'idle');
     if (idleAgv) {
-      state.updateAGVStatus(idleAgv.id, { 
-        status: 'moving', 
-        currentTask: `Exporting ${itemId} from ${itemToExport.slotId}` 
+      state.updateAGVStatus(idleAgv.id, {
+        status: 'moving',
+        currentTask: `Exporting ${itemId} from ${itemToExport.slotId}`
       });
       setTimeout(() => {
         state.updateAGVStatus(idleAgv.id, { status: 'idle', currentTask: null });
       }, 5000);
     }
-    
+
     set((state) => {
       const newInventory = [...state.inventory];
       newInventory.splice(itemIndex, 1);
-      
+
       const newUsed = Math.max(state.stats.usedCapacity - itemToExport.size, 0);
       return {
         inventory: newInventory,
@@ -170,47 +205,155 @@ export const useSimulationStore = create<SimulationState>((set, get) => ({
         ].slice(0, 50)
       };
     });
-    
+
     return true;
   },
 
   loadWarehouse: async (id: string) => {
-    set({ appStatus: 'loading' });
-    await new Promise((resolve) => setTimeout(resolve, 1500));
-    set({
-      appStatus: 'running',
-      warehouseConfig: { id, width: 1000, height: 800, layoutType: 'dense' },
-      stats: { totalCapacity: 10000, usedCapacity: 6500, pendingOrders: 12 },
-      agvs: [
-        { id: 'AGV-01', status: 'moving', battery: 85, x: 5, y: 3, currentTask: 'Moving to Shelf A' },
-        { id: 'AGV-02', status: 'charging', battery: 20, x: 1, y: 1, currentTask: 'Charging...' },
-      ],
-      inventory: [],
-      logs: [{ id: generateId(), time: new Date().toLocaleTimeString(), message: `Loaded warehouse ${id}.`, type: 'success' }]
-    });
+    set({ appStatus: 'loading', lastError: null });
+    try {
+      // Fetch warehouse (includes layout_data)
+      const whRes = await fetch(`${API_BASE}/warehouses/${id}`);
+      if (!whRes.ok) {
+        const errData = await whRes.json();
+        throw new Error(errData.message || `Warehouse not found (${id})`);
+      }
+      const warehouse = await whRes.json();
+
+      // Fetch functional slots
+      const slotsRes = await fetch(`${API_BASE}/warehouses/${id}/slots`);
+      const slots = await slotsRes.json();
+
+      const storageCount = slots.filter((s: SlotData) => s.slot_type === 'STORAGE').length;
+
+      set({
+        appStatus: 'running',
+        warehouseConfig: { id: warehouse.id, code: warehouse.code, width: warehouse.width, height: warehouse.height, layoutType: warehouse.layout_type },
+        layoutGrid: warehouse.layout_data,
+        slots: slots,
+        stats: { totalCapacity: storageCount, usedCapacity: 0, pendingOrders: 0 },
+        agvs: [],
+        inventory: [],
+        logs: [{ id: generateId(), time: new Date().toLocaleTimeString(), message: `Loaded warehouse ${warehouse.code}.`, type: 'success' }]
+      });
+    } catch (error: any) {
+      console.error(error);
+      set({
+        appStatus: 'setup',
+        lastError: error.message,
+        logs: [{ id: generateId(), time: new Date().toLocaleTimeString(), message: error.message, type: 'error' }]
+      });
+      throw error;
+    }
   },
 
   createWarehouse: async (config, initialAgvCount) => {
     set({ appStatus: 'loading' });
-    await new Promise((resolve) => setTimeout(resolve, 1500));
-    
-    const newId = `WH-${generateId().toUpperCase()}`;
-    const initialAgvs: AGVData[] = Array.from({ length: initialAgvCount }).map((_, i) => ({
-      id: `AGV-${(i + 1).toString().padStart(2, '0')}`,
-      status: 'idle',
-      battery: 100,
-      x: Math.floor(Math.random() * config.width),
-      y: Math.floor(Math.random() * config.height),
-      currentTask: null
-    }));
-    
+
+    try {
+      const code = `WH-${generateId()}`;
+
+      // 1. Call Backend to create warehouse (returns warehouse with layout_data)
+      const res = await fetch(`${API_BASE}/warehouses`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          code,
+          name: `Warehouse ${code}`,
+          width: config.width,
+          height: config.height,
+          layout_type: config.layoutType,
+        }),
+      });
+
+      if (!res.ok) {
+        const errData = await res.json();
+        throw new Error(errData.message || 'Failed to create warehouse');
+      }
+      const warehouse = await res.json();
+
+      // 2. Fetch the functional slots
+      const slotsRes = await fetch(`${API_BASE}/warehouses/${warehouse.id}/slots`);
+      const slots: SlotData[] = await slotsRes.json();
+
+      const storageCount = slots.filter(s => s.slot_type === 'STORAGE').length;
+      const chargingSlots = slots.filter(s => s.slot_type === 'CHARGING');
+
+      // 3. Spawn AGVs on AISLE cells (perimeter row 1)
+      const layoutGrid: number[][] | null = warehouse.layout_data;
+      const initialAgvs: AGVData[] = Array.from({ length: initialAgvCount }).map((_, i) => {
+        let spawnX = 1 + (i * 3) % (config.width - 2);
+        let spawnY = 1;
+
+        // Try to find a valid aisle cell on perimeter
+        if (layoutGrid) {
+          for (let c = 1 + i * 3; c < config.width - 1; c++) {
+            if (layoutGrid[1] && layoutGrid[1][c] === 0) { // 0 = AISLE
+              spawnX = c;
+              spawnY = 1;
+              break;
+            }
+          }
+        }
+
+        return {
+          id: `AGV-${(i + 1).toString().padStart(2, '0')}`,
+          status: 'idle' as const,
+          battery: 100,
+          x: spawnX,
+          y: spawnY,
+          currentTask: null,
+        };
+      });
+
+      set({
+        appStatus: 'running',
+        warehouseConfig: { id: warehouse.id, code: warehouse.code, width: warehouse.width, height: warehouse.height, layoutType: warehouse.layout_type },
+        layoutGrid: warehouse.layout_data,
+        slots: slots,
+        stats: { totalCapacity: storageCount, usedCapacity: 0, pendingOrders: 0 },
+        agvs: initialAgvs,
+        inventory: [],
+        logs: [{ id: generateId(), time: new Date().toLocaleTimeString(), message: `Created warehouse ${warehouse.code}: ${warehouse.width}x${warehouse.height} grid, ${storageCount} storage slots, ${chargingSlots.length} charging stations.`, type: 'success' }]
+      });
+    } catch (error: any) {
+      console.error(error);
+      set({
+        appStatus: 'setup',
+        lastError: error.message,
+        logs: [{ id: generateId(), time: new Date().toLocaleTimeString(), message: error.message, type: 'error' }]
+      });
+      throw error;
+    }
+  },
+
+  fetchAvailableWarehouses: async () => {
+    try {
+      const res = await fetch(`${API_BASE}/warehouses`);
+      if (res.ok) {
+        const data = await res.json();
+        set({ availableWarehouses: data });
+      }
+    } catch (err) {
+      console.error("Failed to fetch warehouses", err);
+    }
+  },
+
+  resetSimulation: () => {
     set({
-      appStatus: 'running',
-      warehouseConfig: { id: newId, width: config.width, height: config.height, layoutType: config.layoutType },
-      stats: { totalCapacity: config.width * config.height / 100, usedCapacity: 0, pendingOrders: 0 },
-      agvs: initialAgvs,
+      appStatus: 'setup',
+      agvs: [],
+      logs: [],
       inventory: [],
-      logs: [{ id: generateId(), time: new Date().toLocaleTimeString(), message: `Created warehouse ${newId} with ${initialAgvCount} AGVs.`, type: 'success' }]
+      slots: [],
+      layoutGrid: null,
+      warehouseConfig: {
+        id: '',
+        code: null,
+        width: 0,
+        height: 0,
+        layoutType: 'standard'
+      }
     });
   }
 }));
