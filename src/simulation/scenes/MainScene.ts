@@ -1,29 +1,7 @@
 import * as Phaser from 'phaser';
-import { useSimulationStore, type AGVData, type LayoutGrid } from '../../store/useSimulationStore';
-
-// ────────────────────────────────────────────────────────────────
-// CONSTANTS
-// ────────────────────────────────────────────────────────────────
-const CELL = 40;                // Grid cell size in pixels
-
-// Grid values (must match backend)
-const GRID_AISLE    = 0;
-const GRID_STORAGE  = 1;
-const GRID_BLOCKED  = 2;
-const GRID_CHARGING = 3;
-
-// Palette
-const COL_BG       = 0x0c1222; // Deep navy background
-const COL_GRID     = 0x162033; // Subtle grid lines
-const COL_WALL     = 0x293548; // Outer wall
-const COL_AISLE    = 0x1c2d45; // Aisle floor (slightly lighter)
-const COL_TAPE     = 0xeab308; // Yellow guidance tape
-const COL_RACK_A   = 0x374f6e; // Rack variant A (cool blue-grey)
-const COL_RACK_B   = 0x2d5a4c; // Rack variant B (teal-green)
-const COL_RACK_C   = 0x5a3d2d; // Rack variant C (warm brown)
-const COL_RACK_BRD = 0x0f1b2d; // Rack border
-const COL_CHARGING = 0x1e3a8a; // Charging station base (deep blue)
-const COL_CHARGE_ICON = 0x60a5fa; // Icon color (bright blue)
+import { useSimulationStore, type LayoutGrid } from '../../store/useSimulationStore';
+import { GridRenderer, CELL, GRID_AISLE, GRID_BLOCKED, GRID_STORAGE } from '../renderers/GridRenderer';
+import { AGVRenderer } from '../renderers/AGVRenderer';
 
 // ────────────────────────────────────────────────────────────────
 // SCENE
@@ -32,9 +10,12 @@ export default class MainScene extends Phaser.Scene {
   private grid: number[][] = [];
   private cols = 0;
   private rows = 0;
+  
+  private gridRenderer!: GridRenderer;
+  private agvRenderer!: AGVRenderer;
   private inventoryLayer!: Phaser.GameObjects.Container;
-  private slotCoordinates: Map<string, { x: number, y: number }> = new Map();
   private needsInventoryUpdate = false;
+  private unsubscribers: (() => void)[] = [];
 
   constructor() {
     super({ key: 'MainScene' });
@@ -45,9 +26,15 @@ export default class MainScene extends Phaser.Scene {
   create() {
     const { warehouseConfig, agvs, layoutGrid } = useSimulationStore.getState();
     
-    // Use width/height directly as cols/rows (they ARE grid cell counts now)
-    this.cols = Math.max(12, warehouseConfig.width);
-    this.rows = Math.max(12, warehouseConfig.height);
+    // Cleanup subscriptions on shutdown
+    this.events.once('shutdown', () => {
+      this.unsubscribers.forEach(unsub => unsub());
+      this.unsubscribers = [];
+    });
+    
+    // Use width/height directly as cols/rows
+    this.cols = warehouseConfig.width;
+    this.rows = warehouseConfig.height;
     const totalW = this.cols * CELL;
     const totalH = this.rows * CELL;
 
@@ -57,9 +44,40 @@ export default class MainScene extends Phaser.Scene {
     this.cameras.main.setZoom(fitZoom);
     this.cameras.main.centerOn(totalW / 2, totalH / 2);
 
+    // Initialize Renderers
+    this.gridRenderer = new GridRenderer(this);
+    this.agvRenderer = new AGVRenderer(this);
+
     this.buildGrid(layoutGrid);
-    this.renderGrid();
-    this.spawnAGVs(agvs);
+    this.gridRenderer.render(this.grid, this.cols, this.rows);
+    this.agvRenderer.spawnAGVs(agvs, this.cols, this.rows);
+    
+    // Setup Inventory visuals
+    this.inventoryLayer = this.add.container(0, 0);
+    this.updateInventoryVisuals();
+    
+    // UI Label
+    this.add.text(CELL + 10, CELL + 10, `⚙ ${warehouseConfig.code || warehouseConfig.id || 'WAREHOUSE SIM'}`, {
+      fontSize: '16px',
+      fontFamily: 'monospace',
+      color: '#10b981',
+      backgroundColor: '#0c122288',
+      padding: { x: 8, y: 4 },
+    }).setScale(1 / fitZoom).setDepth(30);
+
+    // Subscriptions
+    const unsubInv = useSimulationStore.subscribe((state, prevState) => {
+      if (state.inventory !== prevState.inventory) {
+        this.needsInventoryUpdate = true;
+      }
+    });
+    const unsubAgv = useSimulationStore.subscribe((state, prevState) => {
+      if (state.agvs !== prevState.agvs) {
+        this.agvRenderer.syncAGVs(state.agvs);
+      }
+    });
+    this.unsubscribers.push(unsubInv, unsubAgv);
+
     this.setupControls();
   }
 
@@ -67,12 +85,16 @@ export default class MainScene extends Phaser.Scene {
   private buildGrid(layoutGrid: LayoutGrid | null) {
     const { cols, rows } = this;
 
-    if (layoutGrid && layoutGrid.length === rows && layoutGrid[0]?.length === cols) {
-      // Use layout_data from backend directly!
+    if (layoutGrid && layoutGrid.length > 0) {
+      // Trust the backend layout data
       this.grid = layoutGrid;
+      // Sync rows/cols if they differ from config for any reason
+      this.rows = layoutGrid.length;
+      this.cols = layoutGrid[0].length;
     } else {
-      // Fallback: generate locally (should rarely happen)
+      // Fallback: generate locally
       this.grid = Array.from({ length: rows }, () => Array(cols).fill(GRID_AISLE));
+      // ... (giữ nguyên logic fallback)
 
       for (let r = 0; r < rows; r++) {
         for (let c = 0; c < cols; c++) {
@@ -94,125 +116,12 @@ export default class MainScene extends Phaser.Scene {
     }
   }
 
-  // ─── 2. RENDER ──────────────────────────────────────────────────
-  private renderGrid() {
-    const { cols, rows, grid } = this;
-    const totalW = cols * CELL;
-    const totalH = rows * CELL;
-
-    this.add.rectangle(totalW / 2, totalH / 2, totalW, totalH, COL_BG);
-
-    const gfxGrid = this.add.graphics();
-    gfxGrid.lineStyle(1, COL_GRID, 0.4);
-    for (let c = 0; c <= cols; c++) { gfxGrid.moveTo(c * CELL, 0); gfxGrid.lineTo(c * CELL, totalH); }
-    for (let r = 0; r <= rows; r++) { gfxGrid.moveTo(0, r * CELL); gfxGrid.lineTo(totalW, r * CELL); }
-    gfxGrid.strokePath();
-
-    const gfxWall  = this.add.graphics();
-    const gfxAisle = this.add.graphics();
-    const gfxRack  = this.add.graphics();
-    const gfxCharge = this.add.graphics();
-    const gfxTape  = this.add.graphics();
-    gfxTape.lineStyle(3, COL_TAPE, 0.65);
-
-    const rackColors = [COL_RACK_A, COL_RACK_B, COL_RACK_C];
-    let blockIndex = 0;
-    const coloredBlocks = new Map<string, number>();
-
-    this.inventoryLayer = this.add.container(0, 0);
-
-    for (let r = 0; r < rows; r++) {
-      for (let c = 0; c < cols; c++) {
-        const px = c * CELL;
-        const py = r * CELL;
-        const tile = grid[r][c];
-
-        if (tile === GRID_BLOCKED) {
-          gfxWall.fillStyle(COL_WALL, 1);
-          gfxWall.fillRect(px, py, CELL, CELL);
-        } else if (tile === GRID_AISLE) {
-          gfxAisle.fillStyle(COL_AISLE, 1);
-          gfxAisle.fillRect(px, py, CELL, CELL);
-          // Guidance tape: connect to adjacent aisles
-          const cx = px + CELL / 2;
-          const cy = py + CELL / 2;
-          if (r > 0         && grid[r - 1][c] === GRID_AISLE) { gfxTape.beginPath(); gfxTape.moveTo(cx, cy); gfxTape.lineTo(cx, py);        gfxTape.strokePath(); }
-          if (r < rows - 1  && grid[r + 1][c] === GRID_AISLE) { gfxTape.beginPath(); gfxTape.moveTo(cx, cy); gfxTape.lineTo(cx, py + CELL); gfxTape.strokePath(); }
-          if (c > 0          && grid[r][c - 1] === GRID_AISLE) { gfxTape.beginPath(); gfxTape.moveTo(cx, cy); gfxTape.lineTo(px, cy);        gfxTape.strokePath(); }
-          if (c < cols - 1   && grid[r][c + 1] === GRID_AISLE) { gfxTape.beginPath(); gfxTape.moveTo(cx, cy); gfxTape.lineTo(px + CELL, cy); gfxTape.strokePath(); }
-        } else if (tile === GRID_CHARGING) {
-          // Drawing charging station
-          gfxCharge.fillStyle(COL_CHARGING, 1);
-          gfxCharge.fillRoundedRect(px + 4, py + 4, CELL - 8, CELL - 8, 4);
-          gfxCharge.lineStyle(2, COL_CHARGE_ICON, 0.6);
-          gfxCharge.strokeRoundedRect(px + 4, py + 4, CELL - 8, CELL - 8, 4);
-          
-          // Lightning icon
-          const cx = px + CELL / 2;
-          const cy = py + CELL / 2;
-          this.add.text(cx, cy, '⚡', { fontSize: '14px', color: '#60a5fa' }).setOrigin(0.5).setDepth(5);
-        } else if (tile === GRID_STORAGE) {
-          // Rack coloring by block
-          const cr = r - 2;
-          const cc = c - 2;
-          const blockR = Math.floor(Math.max(0, cr) / 5) * 5 + 2;
-          const blockC = Math.floor(Math.max(0, cc) / 3) * 3 + 2;
-          const blockKey = `${blockR},${blockC}`;
-
-          let color: number;
-          if (coloredBlocks.has(blockKey)) {
-            color = coloredBlocks.get(blockKey)!;
-          } else {
-            color = rackColors[blockIndex % rackColors.length];
-            coloredBlocks.set(blockKey, color);
-            blockIndex++;
-          }
-
-          gfxRack.fillStyle(color, 1);
-          gfxRack.fillRect(px + 1, py + 1, CELL - 2, CELL - 2);
-          gfxRack.fillStyle(color + 0x111111, 0.6);
-          gfxRack.fillRect(px + 4, py + 4, CELL - 8, CELL - 8);
-          gfxRack.lineStyle(1, COL_RACK_BRD, 0.8);
-          gfxRack.strokeRect(px + 1, py + 1, CELL - 2, CELL - 2);
-
-          // Slot label
-          const slotCode = `R${r}-C${c}`;
-          this.slotCoordinates.set(slotCode, { x: px + CELL / 2, y: py + CELL / 2 });
-
-          // Show label on first cell of each block
-          if (Math.max(0, cr) % 5 === 0 && Math.max(0, cc) % 3 === 0) {
-            this.add.text(px + CELL, py + CELL, slotCode, {
-              fontSize: '8px',
-              fontFamily: 'monospace',
-              color: '#8899aa',
-            }).setOrigin(0.5).setDepth(5);
-          }
-        }
-      }
-    }
-
-    this.updateInventoryVisuals();
-    useSimulationStore.subscribe(() => {
-      this.needsInventoryUpdate = true;
-    });
-
-    const { warehouseConfig } = useSimulationStore.getState();
-    const zoom = this.cameras.main.zoom;
-    this.add.text(CELL + 10, CELL + 10, `⚙ ${warehouseConfig.code || warehouseConfig.id || 'WAREHOUSE SIM'}`, {
-      fontSize: '16px',
-      fontFamily: 'monospace',
-      color: '#10b981',
-      backgroundColor: '#0c122288',
-      padding: { x: 8, y: 4 },
-    }).setScale(1 / zoom).setDepth(30);
-  }
-
   private updateInventoryVisuals() {
     const { inventory } = useSimulationStore.getState();
     this.inventoryLayer.removeAll(true);
     inventory.forEach(item => {
-      if (item.slotId && this.slotCoordinates.has(item.slotId)) {
-        const coords = this.slotCoordinates.get(item.slotId)!;
+      if (item.slotId && this.gridRenderer.slotCoordinates.has(item.slotId)) {
+        const coords = this.gridRenderer.slotCoordinates.get(item.slotId)!;
         const pkg = this.add.rectangle(coords.x, coords.y, CELL * 0.6, CELL * 0.6, 0xd97706);
         pkg.setStrokeStyle(1, 0x78350f);
         const tape = this.add.rectangle(coords.x, coords.y, CELL * 0.6, 2, 0x92400e);
@@ -220,104 +129,6 @@ export default class MainScene extends Phaser.Scene {
       }
     });
     this.needsInventoryUpdate = false;
-  }
-
-  private agvSprites: Map<string, { container: Phaser.GameObjects.Container, label: Phaser.GameObjects.Text }> = new Map();
-
-  // ─── 3. AGV SYSTEM ──────────────────────────────────────────────
-  private spawnAGVs(agvs: AGVData[]) {
-    const half = CELL / 2;
-    const TL = { x: 1 * CELL + half, y: 1 * CELL + half };
-    const TR = { x: (this.cols - 2) * CELL + half, y: 1 * CELL + half };
-    const BR = { x: (this.cols - 2) * CELL + half, y: (this.rows - 2) * CELL + half };
-    const BL = { x: 1 * CELL + half, y: (this.rows - 2) * CELL + half };
-
-    const SPEED = 100;
-
-    agvs.forEach((agv, i) => {
-      const isCharging = agv.status === 'charging';
-      const col = agv.status === 'moving' ? 0x10b981 : isCharging ? 0xf59e0b : 0x3b82f6;
-      
-      // Use AGV's grid coordinates to place them on the map
-      let sx = agv.x * CELL + half;
-      let sy = agv.y * CELL + half;
-
-      const ct = this.add.container(sx, sy);
-      
-      const body = this.add.rectangle(0, 0, 28, 28, col).setStrokeStyle(2, 0x0a0f1a);
-      ct.add([
-        this.add.rectangle(0, -13, 20, 5, 0x0a0f1a),
-        this.add.rectangle(0,  13, 20, 5, 0x0a0f1a),
-        body,
-        this.add.rectangle(13, 0, 4, 14, 0x22d3ee),
-        this.add.circle(-10, -10, 3, 0xef4444),
-      ]);
-      
-      const id = agv.id.split('-')[1] || '??';
-      const lbl = this.add.text(sx, sy - 22, id, {
-        fontSize: '11px',
-        fontFamily: 'monospace',
-        fontStyle: 'bold',
-        color: '#ffffff',
-        backgroundColor: col === 0x10b981 ? '#059669' : col === 0xf59e0b ? '#d97706' : '#2563eb',
-        padding: { x: 3, y: 1 },
-      }).setOrigin(0.5).setDepth(20);
-
-      this.agvSprites.set(agv.id, { container: ct, label: lbl });
-
-      // Default patrol if moving
-      if (agv.status === 'moving') {
-        this.startPatrol(agv.id, sx, TL, TR, BR, BL, SPEED);
-      } else if (isCharging) {
-        ct.setRotation(-Math.PI / 2);
-      }
-    });
-
-    useSimulationStore.subscribe((state) => {
-      this.syncAGVs(state.agvs);
-    });
-  }
-
-  private startPatrol(id: string, sx: number, TL: any, TR: any, BR: any, BL: any, SPEED: number) {
-    const sprite = this.agvSprites.get(id);
-    if (!sprite) return;
-    const { container: ct } = sprite;
-
-    const dTR = Math.max(1, (TR.x - sx) / CELL);
-    const dRB = (BR.y - TR.y) / CELL;
-    const dBL = (BR.x - BL.x) / CELL;
-    const dLT = (BL.y - TL.y) / CELL;
-    const dBack = Math.max(1, (sx - TL.x) / CELL);
-
-    this.tweens.chain({
-      targets: ct,
-      loop: -1,
-      persist: true,
-      tweens: [
-        { x: TR.x, y: TR.y, duration: dTR * SPEED, onStart: () => ct.setRotation(0) },
-        { x: BR.x, y: BR.y, duration: dRB * SPEED, onStart: () => ct.setRotation(Math.PI / 2) },
-        { x: BL.x, y: BL.y, duration: dBL * SPEED, onStart: () => ct.setRotation(Math.PI) },
-        { x: TL.x, y: TL.y, duration: dLT * SPEED, onStart: () => ct.setRotation(-Math.PI / 2) },
-        { x: sx,   y: TL.y, duration: dBack * SPEED, onStart: () => ct.setRotation(0) },
-      ],
-    });
-  }
-
-  private syncAGVs(agvs: AGVData[]) {
-    agvs.forEach(agv => {
-      const sprite = this.agvSprites.get(agv.id);
-      if (sprite) {
-        const col = agv.status === 'moving' ? 0x10b981 : agv.status === 'charging' ? 0xf59e0b : 0x3b82f6;
-        const body = sprite.container.list[2] as Phaser.GameObjects.Rectangle;
-        if (body) body.setFillStyle(col);
-        
-        sprite.label.setBackgroundColor(col === 0x10b981 ? '#059669' : col === 0xf59e0b ? '#d97706' : '#2563eb');
-        
-        if (agv.status !== 'moving') {
-          this.tweens.killTweensOf(sprite.container);
-        }
-      }
-    });
   }
 
   private setupControls() {
@@ -335,9 +146,6 @@ export default class MainScene extends Phaser.Scene {
     if (this.needsInventoryUpdate) {
       this.updateInventoryVisuals();
     }
-    // Update labels position
-    this.agvSprites.forEach(sprite => {
-      sprite.label.setPosition(sprite.container.x, sprite.container.y - 22);
-    });
+    this.agvRenderer.updatePositions();
   }
 }

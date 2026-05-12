@@ -8,23 +8,35 @@ const SimulationCanvas: React.FC = () => {
   useEffect(() => {
     if (!gameRef.current) return;
 
-    const config: Phaser.Types.Core.GameConfig = {
-      type: Phaser.AUTO,
-      parent: gameRef.current,
-      width: '100%',
-      height: '100%',
-      backgroundColor: '#0f172a', // slate-900
-      scene: [MainScene],
-      scale: {
-        mode: Phaser.Scale.RESIZE,
-        autoCenter: Phaser.Scale.CENTER_BOTH,
-      },
-    };
+    // Clean up any lingering canvas elements manually just in case
+    while (gameRef.current.firstChild) {
+      gameRef.current.removeChild(gameRef.current.firstChild);
+    }
 
-    const game = new Phaser.Game(config);
+    let game: Phaser.Game;
+
+    const initId = requestAnimationFrame(() => {
+      const config: Phaser.Types.Core.GameConfig = {
+        type: Phaser.AUTO,
+        parent: gameRef.current!,
+        width: '100%',
+        height: '100%',
+        backgroundColor: '#0f172a',
+        scene: [MainScene],
+        scale: {
+          mode: Phaser.Scale.RESIZE,
+          autoCenter: Phaser.Scale.CENTER_BOTH,
+        },
+      };
+
+      game = new Phaser.Game(config);
+    });
 
     return () => {
-      game.destroy(true);
+      cancelAnimationFrame(initId);
+      if (game) {
+        game.destroy(true);
+      }
     };
   }, []);
 
