@@ -79,7 +79,7 @@ const DashboardPanel: React.FC = () => {
             {agvs.map((agv) => (
               <div key={agv.id} className="bg-slate-900/50 p-3 rounded-lg border border-slate-700 flex flex-col gap-2">
                 <div className="flex justify-between items-center">
-                  <span className="font-medium text-slate-300">{agv.id}</span>
+                  <span className="font-medium text-slate-300">{agv.code}</span>
                   <span
                     className={`text-xs px-2 py-1 rounded-full ${
                       agv.status === 'moving' ? 'bg-cyan-500/20 text-cyan-400' :

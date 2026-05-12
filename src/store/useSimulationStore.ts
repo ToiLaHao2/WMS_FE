@@ -11,6 +11,7 @@ export interface LogEntry {
 }
 
 export interface AGVData {
+  [x: string]: ReactNode;
   id: string;
   status: 'idle' | 'moving' | 'charging';
   battery: number;

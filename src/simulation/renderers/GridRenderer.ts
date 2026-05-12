@@ -6,26 +6,26 @@ import * as Phaser from 'phaser';
 export const CELL = 40;                // Grid cell size in pixels
 
 // Grid values (must match backend)
-export const GRID_AISLE    = 0;
-export const GRID_STORAGE  = 1;
-export const GRID_BLOCKED  = 2;
+export const GRID_AISLE = 0;
+export const GRID_STORAGE = 1;
+export const GRID_BLOCKED = 2;
 export const GRID_CHARGING = 3;
-export const GRID_INBOUND  = 4;
+export const GRID_INBOUND = 4;
 export const GRID_OUTBOUND = 5;
 
 // Palette
-export const COL_BG       = 0x0c1222; // Deep navy background
-export const COL_GRID     = 0x162033; // Subtle grid lines
-export const COL_WALL     = 0x1e3a8a; // Dark Blue (Tường bao xanh dương đậm)
-export const COL_AISLE    = 0x1c2d45; // Aisle floor (slightly lighter)
-export const COL_TAPE     = 0xeab308; // Yellow guidance tape
-export const COL_RACK_A   = 0x374f6e; // Rack variant A (cool blue-grey)
-export const COL_RACK_B   = 0x2d5a4c; // Rack variant B (teal-green)
-export const COL_RACK_C   = 0x5a3d2d; // Rack variant C (warm brown)
+export const COL_BG = 0x0c1222; // Deep navy background
+export const COL_GRID = 0x162033; // Subtle grid lines
+export const COL_WALL = 0x1e3a8a; // Dark Blue (Tường bao xanh dương đậm)
+export const COL_AISLE = 0x1c2d45; // Aisle floor (slightly lighter)
+export const COL_TAPE = 0xeab308; // Yellow guidance tape
+export const COL_RACK_A = 0x374f6e; // Rack variant A (cool blue-grey)
+export const COL_RACK_B = 0x2d5a4c; // Rack variant B (teal-green)
+export const COL_RACK_C = 0x5a3d2d; // Rack variant C (warm brown)
 export const COL_RACK_BRD = 0x0f1b2d; // Rack border
 export const COL_CHARGING = 0x1e3a8a; // Charging station base (deep blue)
 export const COL_CHARGE_ICON = 0x60a5fa; // Icon color (bright blue)
-export const COL_INBOUND  = 0xef4444; // Red for IN
+export const COL_INBOUND = 0xef4444; // Red for IN
 export const COL_OUTBOUND = 0x10b981; // Green for OUT
 
 export class GridRenderer {
@@ -62,14 +62,14 @@ export class GridRenderer {
     gfxGrid.strokePath();
     this.graphics.push(gfxGrid);
 
-    const gfxWall  = this.scene.add.graphics();
+    const gfxWall = this.scene.add.graphics();
     const gfxAisle = this.scene.add.graphics();
-    const gfxRack  = this.scene.add.graphics();
+    const gfxRack = this.scene.add.graphics();
     const gfxCharge = this.scene.add.graphics();
-    const gfxDock  = this.scene.add.graphics();
-    const gfxTape  = this.scene.add.graphics();
+    const gfxDock = this.scene.add.graphics();
+    const gfxTape = this.scene.add.graphics();
     gfxTape.lineStyle(3, COL_TAPE, 0.65);
-    
+
     this.graphics.push(gfxWall, gfxAisle, gfxRack, gfxCharge, gfxDock, gfxTape);
 
     const rackColors = [COL_RACK_A, COL_RACK_B, COL_RACK_C];
@@ -78,7 +78,7 @@ export class GridRenderer {
 
     // Calculate Bounding Boxes for Racks and Charging to draw Smart Paths
     let minRackR = rows, maxRackR = 0, minRackC = cols, maxRackC = 0;
-    let chargeRow = -1, chargeMinC = cols, chargeMaxC = 0;
+    let chargeRow = -1;
     for (let r = 0; r < rows; r++) {
       for (let c = 0; c < cols; c++) {
         if (grid[r][c] === GRID_STORAGE) {
@@ -88,8 +88,41 @@ export class GridRenderer {
           if (c > maxRackC) maxRackC = c;
         } else if (grid[r][c] === GRID_CHARGING) {
           chargeRow = r;
-          if (c < chargeMinC) chargeMinC = c;
-          if (c > chargeMaxC) chargeMaxC = c;
+        }
+      }
+    }
+
+    // --- Generate NavMesh Path Graph ---
+    const isRackCol = (col: number) => {
+      for (let r = 0; r < rows; r++) if (grid[r][col] === GRID_STORAGE) return true;
+      return false;
+    };
+    const isRackRow = (row: number) => {
+      for (let c = 0; c < cols; c++) if (grid[row][c] === GRID_STORAGE) return true;
+      return false;
+    };
+
+    const horizontalPathRows = new Set<number>();
+    horizontalPathRows.add(1); // Top Highway
+    horizontalPathRows.add(maxRackR + 1); // Bottom Highway
+    for (let r = minRackR; r <= maxRackR; r++) {
+      if (!isRackRow(r)) horizontalPathRows.add(r); // Intermediate cross-aisles
+    }
+
+    const verticalPathCols = new Set<number>();
+    for (let c = minRackC - 1; c <= maxRackC + 1; c++) {
+      if (!isRackCol(c)) verticalPathCols.add(c); // Main vertical aisles
+    }
+
+    const dockCols = new Set<number>();
+    const chargeCols = new Set<number>();
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        if (grid[r][c] === GRID_INBOUND || grid[r][c] === GRID_OUTBOUND) {
+          dockCols.add(c);
+        }
+        if (grid[r][c] === GRID_CHARGING) {
+          chargeCols.add(c);
         }
       }
     }
@@ -100,48 +133,61 @@ export class GridRenderer {
         const py = r * CELL;
         const tile = grid[r][c];
 
+        // --- Graph-based Highway Routing ---
+        const isHPath = horizontalPathRows.has(r) && c >= minRackC - 1 && c <= maxRackC + 1;
+
+        let isVPath = false;
+        if (verticalPathCols.has(c) && r >= 1 && r <= maxRackR + 1) isVPath = true;
+        if (dockCols.has(c) && r >= maxRackR + 1 && r < rows - 1) isVPath = true;
+        if (chargeCols.has(c) && r >= maxRackR + 1 && r < chargeRow) isVPath = true;
+
         if (tile === GRID_BLOCKED) {
           gfxWall.fillStyle(COL_WALL, 1);
           gfxWall.fillRect(px, py, CELL, CELL);
         } else if (tile === GRID_AISLE) {
           gfxAisle.fillStyle(COL_AISLE, 1);
           gfxAisle.fillRect(px, py, CELL, CELL);
-          
-          // --- Explicit Highway Routing ---
-          const isTopHighway = (r === 1 && c >= minRackC - 1 && c <= maxRackC + 1);
-          const isBottomHighway = (r === maxRackR + 1 && c >= minRackC - 1 && c <= maxRackC + 1);
-          
-          // Is it a vertical aisle between or next to racks?
-          const isVerticalAisle = (r >= 1 && r <= maxRackR + 1 && 
-             (grid[r][c-1] === GRID_STORAGE || grid[r][c+1] === GRID_STORAGE || 
-              (r > 1 && (grid[r-1][c-1] === GRID_STORAGE || grid[r-1][c+1] === GRID_STORAGE))));
+        }
 
-          // Branch lines down to charging and docks
-          // FIX: Only draw branch line down to the row *above* the charging station, not below it!
-          const isDockBranch = (r > maxRackR + 1 && r < rows - 1 && (grid[rows-2][c] === GRID_INBOUND || grid[rows-2][c] === GRID_OUTBOUND));
-          const isChargeBranch = (r > maxRackR + 1 && r < chargeRow && grid[chargeRow][c] === GRID_CHARGING);
-          const isBranch = isDockBranch || isChargeBranch;
-
-          if (isTopHighway || isBottomHighway || isVerticalAisle || isBranch) {
+        // Draw NavMesh paths (even on EMPTY tiles if they are branches)
+        if (tile === GRID_AISLE || tile === 0) { // 0 is GRID_EMPTY
+          if (isHPath || isVPath) {
             const cx = px + CELL / 2;
             const cy = py + CELL / 2;
-            
+
             // Draw Dotted Line segments (5 evenly spaced dots per cell)
             gfxTape.fillStyle(COL_TAPE, 0.8);
             const offsets = [-16, -8, 0, 8, 16]; // 40px cell divided by 5 gives 8px spacing
+
+            // Determine endpoints to cut off redundant "stubs"
+            const isLeftEnd = isHPath && c === minRackC - 1;
+            const isRightEnd = isHPath && c === maxRackC + 1;
             
-            if (isTopHighway || isBottomHighway) {
-                offsets.forEach(offset => gfxTape.fillCircle(cx + offset, cy, 1.5));
+            // A vertical path is a "Top End" (shouldn't go further up) if it's at r=1 (Top Highway)
+            // OR if it's a branch starting at the Bottom Highway and there's no vertical aisle above it.
+            const isTopEnd = isVPath && (r === 1 || (r === maxRackR + 1 && !verticalPathCols.has(c)));
+            
+            // A vertical path is a "Bottom End" (shouldn't go further down) if it's an aisle ending at the Bottom Highway
+            // with no docks or chargers below it.
+            const isBottomEnd = isVPath && r === maxRackR + 1 && !dockCols.has(c) && !chargeCols.has(c);
+
+            if (isHPath) {
+              offsets.forEach(offset => {
+                if (isLeftEnd && offset < 0) return; // Cut off left stub
+                if (isRightEnd && offset > 0) return; // Cut off right stub
+                gfxTape.fillCircle(cx + offset, cy, 1.5);
+              });
             }
-            if (isVerticalAisle || isBranch) {
-                offsets.forEach(offset => {
-                    // Avoid drawing the center dot twice at intersections
-                    const isCenter = offset === 0;
-                    const isIntersection = (isTopHighway || isBottomHighway) && (isVerticalAisle || isBranch);
-                    if (!(isIntersection && isCenter && (isTopHighway || isBottomHighway))) {
-                        gfxTape.fillCircle(cx, cy + offset, 1.5);
-                    }
-                });
+            if (isVPath) {
+              offsets.forEach(offset => {
+                if (isTopEnd && offset < 0) return; // Cut off top stub
+                if (isBottomEnd && offset > 0) return; // Cut off bottom stub
+
+                // Avoid drawing the center dot twice at intersections
+                if (offset === 0 && isHPath) return;
+
+                gfxTape.fillCircle(cx, cy + offset, 1.5);
+              });
             }
           }
         } else if (tile === GRID_CHARGING) {
@@ -150,7 +196,7 @@ export class GridRenderer {
           gfxCharge.fillRoundedRect(px + 4, py + 4, CELL - 8, CELL - 8, 4);
           gfxCharge.lineStyle(2, COL_CHARGE_ICON, 0.6);
           gfxCharge.strokeRoundedRect(px + 4, py + 4, CELL - 8, CELL - 8, 4);
-          
+
           // Lightning icon
           const cx = px + CELL / 2;
           const cy = py + CELL / 2;
