@@ -7,46 +7,39 @@ interface ImportModalProps {
 }
 
 const ImportModal: React.FC<ImportModalProps> = ({ onClose }) => {
-  const { checkImportFeasibility, importGoods } = useSimulationStore();
+  const { importGoods } = useSimulationStore();
 
   const [formData, setFormData] = useState({
-    name: '',
-    size: '',
-    weight: '',
-    description: ''
+    productId: 'PROD-101',
+    quantity: 1
   });
 
   const [status, setStatus] = useState<'idle' | 'checked_ok' | 'checked_fail' | 'importing' | 'success'>('idle');
   const [importedId, setImportedId] = useState<string | null>(null);
 
   const handleCheck = () => {
-    const size = Number(formData.size);
-    if (!size || size <= 0) {
-      alert("Vui lòng nhập kích thước hợp lệ.");
+    if (!formData.productId || formData.quantity <= 0) {
+      alert("Vui lòng nhập Product ID và số lượng hợp lệ.");
       return;
     }
-    const isFeasible = checkImportFeasibility(size);
-    setStatus(isFeasible ? 'checked_ok' : 'checked_fail');
+    // Tạm bỏ qua logic check capacity do API sẽ tự lo
+    setStatus('checked_ok');
   };
 
-  const handleImport = () => {
+  const handleImport = async () => {
     setStatus('importing');
     
-    // Simulate API delay for MES processing
-    setTimeout(() => {
-      const newItemId = importGoods({
-        name: formData.name,
-        size: Number(formData.size),
-        weight: Number(formData.weight) || 0,
-        description: formData.description
-      });
+    const newItemId = await importGoods(formData.productId, formData.quantity);
+    if (newItemId) {
       setImportedId(newItemId);
       setStatus('success');
-    }, 1000);
+    } else {
+      setStatus('checked_fail');
+    }
   };
 
   const resetForm = () => {
-    setFormData({ name: '', size: '', weight: '', description: '' });
+    setFormData({ productId: 'PROD-101', quantity: 1 });
     setStatus('idle');
     setImportedId(null);
   };
@@ -92,50 +85,25 @@ const ImportModal: React.FC<ImportModalProps> = ({ onClose }) => {
           ) : (
             <div className="space-y-4">
               <div className="space-y-1">
-                <label className="text-xs font-medium text-slate-400">Tên Hàng Hóa</label>
+                <label className="text-xs font-medium text-slate-400">Mã Sản Phẩm (Product ID)</label>
                 <input
                   type="text"
-                  value={formData.name}
-                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                  value={formData.productId}
+                  onChange={(e) => setFormData({ ...formData, productId: e.target.value })}
                   disabled={status === 'importing'}
-                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-slate-200 focus:outline-none focus:border-emerald-500"
+                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-slate-200 focus:outline-none focus:border-emerald-500 transition-colors"
+                  placeholder="VD: PROD-101"
                 />
               </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1">
-                  <label className="text-xs font-medium text-slate-400">Kích thước (Volume)*</label>
-                  <input
-                    type="number"
-                    min="1"
-                    value={formData.size}
-                    onChange={(e) => {
-                      setFormData({ ...formData, size: e.target.value });
-                      setStatus('idle'); // Reset check status if size changes
-                    }}
-                    disabled={status === 'importing'}
-                    className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-slate-200 focus:outline-none focus:border-emerald-500"
-                    placeholder="VD: 50"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-xs font-medium text-slate-400">Khối lượng (kg)</label>
-                  <input
-                    type="number"
-                    min="0"
-                    value={formData.weight}
-                    onChange={(e) => setFormData({ ...formData, weight: e.target.value })}
-                    disabled={status === 'importing'}
-                    className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-slate-200 focus:outline-none focus:border-emerald-500"
-                  />
-                </div>
-              </div>
               <div className="space-y-1">
-                <label className="text-xs font-medium text-slate-400">Mô tả (Description)</label>
-                <textarea
-                  value={formData.description}
-                  onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                <label className="text-xs font-medium text-slate-400">Số Lượng</label>
+                <input
+                  type="number"
+                  min="1"
+                  value={formData.quantity}
+                  onChange={(e) => setFormData({ ...formData, quantity: parseInt(e.target.value) || 1 })}
                   disabled={status === 'importing'}
-                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-slate-200 focus:outline-none focus:border-emerald-500 min-h-[80px]"
+                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-slate-200 focus:outline-none focus:border-emerald-500 transition-colors"
                 />
               </div>
 
@@ -156,7 +124,7 @@ const ImportModal: React.FC<ImportModalProps> = ({ onClose }) => {
               <div className="pt-4 flex gap-3">
                 <button
                   onClick={handleCheck}
-                  disabled={!formData.size || status === 'importing'}
+                  disabled={!formData.productId || status === 'importing'}
                   className="flex-1 py-2.5 bg-slate-700 hover:bg-slate-600 disabled:opacity-50 text-slate-200 font-medium rounded-lg transition-colors"
                 >
                   Kiểm tra chỗ trống

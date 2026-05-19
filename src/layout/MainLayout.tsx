@@ -3,9 +3,13 @@ import { LogOut } from 'lucide-react';
 import StatsSidebar from '../features/dashboard/StatsSidebar';
 import DashboardPanel from '../features/dashboard/DashboardPanel';
 import SimulationCanvas from '../simulation/SimulationCanvas';
+import { useAGVSocket } from '../hooks/useAGVSocket';
 
 const MainLayout: React.FC = () => {
-  const { resetSimulation, warehouseConfig } = useSimulationStore();
+  const { resetSimulation } = useSimulationStore();
+  
+  // Khởi động kết nối Socket.IO
+  useAGVSocket();
 
   return (
     <div className="flex w-screen h-screen overflow-hidden bg-slate-900 text-slate-100">

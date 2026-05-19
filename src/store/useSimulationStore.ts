@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { create } from 'zustand';
 
 export type LogType = 'info' | 'warning' | 'success' | 'error';
@@ -78,8 +79,9 @@ interface SimulationState {
 
   // Logic
   checkImportFeasibility: (size: number) => boolean;
-  importGoods: (item: Omit<InventoryItem, 'id'>) => string;
+  importGoods: (itemId: string, quantity: number) => Promise<string | null>;
   exportGoods: (itemId: string) => boolean;
+  updateAGVPosition: (id: string, x: number, y: number, status: AGVData['status']) => void;
 
   loadWarehouse: (id: string) => Promise<void>;
   createWarehouse: (config: Omit<WarehouseConfig, 'id' | 'code'>, initialAgvCount: number) => Promise<void>;
@@ -133,41 +135,38 @@ export const useSimulationStore = create<SimulationState>((set, get) => ({
     return stats.usedCapacity + size <= stats.totalCapacity;
   },
 
-  importGoods: (item) => {
+  updateAGVPosition: (id, x, y, status) => set(state => ({
+    agvs: state.agvs.map(agv =>
+      agv.id === id ? { ...agv, x, y, status: status as AGVData['status'] } : agv
+    )
+  })),
+
+  importGoods: async (itemId: string, quantity: number) => {
     const state = get();
-    const itemId = `ITEM-${generateId()}`;
-    // Pick a random STORAGE slot from the slots array
-    const storageSlots = state.slots.filter(s => s.slot_type === 'STORAGE' && s.status === 'AVAILABLE');
-    const targetSlot = storageSlots.length > 0
-      ? storageSlots[Math.floor(Math.random() * storageSlots.length)]
-      : null;
-    const slotCode = targetSlot?.slot_code || 'UNKNOWN';
-    const newItem = { ...item, id: itemId, slotId: slotCode };
+    state.addLog(`Đang gửi yêu cầu nhập hàng: ${itemId} (Số lượng: ${quantity})...`, 'info');
 
-    const idleAgv = state.agvs.find(a => a.status === 'idle');
-    if (idleAgv) {
-      state.updateAGVStatus(idleAgv.id, {
-        status: 'moving',
-        currentTask: `Importing ${itemId} to ${slotCode}`
+    try {
+      // 1. Tạo Inbound Order qua API Backend
+      const res = await fetch(`${API_BASE}/inbound`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          warehouse_id: state.warehouseConfig?.id,
+          code: `IN-${Date.now()}`,
+          items: [{ product_id: itemId, quantity: quantity }]
+        })
       });
-      setTimeout(() => {
-        state.updateAGVStatus(idleAgv.id, { status: 'idle', currentTask: null });
-      }, 5000);
+
+      if (!res.ok) {
+        throw new Error('Không thể tạo Inbound Order. Server trả về lỗi.');
+      }
+
+      state.addLog(`Nhận yêu cầu nhập hàng thành công! Đang chờ AGV xử lý...`, 'success');
+      return itemId;
+    } catch (err: any) {
+      state.addLog(`Lỗi nhập hàng: ${err.message}`, 'error');
+      return null;
     }
-
-    set((state) => {
-      const newUsed = Math.min(state.stats.usedCapacity + item.size, state.stats.totalCapacity);
-      return {
-        inventory: [...state.inventory, newItem],
-        stats: { ...state.stats, usedCapacity: newUsed },
-        logs: [
-          { id: generateId(), time: new Date().toLocaleTimeString(), message: `Nhập thành công hàng: ${item.name} (ID: ${itemId}) vào ô ${slotCode}`, type: 'success' as LogType },
-          ...state.logs,
-        ].slice(0, 50)
-      };
-    });
-
-    return itemId;
   },
 
   exportGoods: (itemId) => {
