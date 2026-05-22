@@ -1,97 +1,12 @@
-import type { ReactNode } from 'react';
 import { create } from 'zustand';
+import type { SimulationState, AGVData, LogType, SlotData } from './types';
+import { API_MASTER_DATA, API_INBOUND } from './api';
 
-export type LogType = 'info' | 'warning' | 'success' | 'error';
-export type AppStatus = 'setup' | 'loading' | 'running';
-
-export interface LogEntry {
-  id: string;
-  time: string;
-  message: string;
-  type: LogType;
-}
-
-export interface AGVData {
-  [x: string]: ReactNode;
-  id: string;
-  status: 'idle' | 'moving' | 'charging';
-  battery: number;
-  x: number;
-  y: number;
-  currentTask: string | null;
-}
-
-export interface WarehouseStats {
-  totalCapacity: number;
-  usedCapacity: number;
-  pendingOrders: number;
-}
-
-export interface WarehouseConfig {
-  id: string | null;
-  code: string | null;
-  width: number;   // cols (grid cells)
-  height: number;  // rows (grid cells)
-  layoutType: string;
-}
-
-export interface InventoryItem {
-  id: string;
-  name: string;
-  size: number;
-  weight: number;
-  description: string;
-  slotId?: string;
-}
-
-export interface SlotData {
-  id: string;
-  slot_code: string;
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  slot_type: 'STORAGE' | 'AISLE' | 'BLOCKED' | 'PICKUP' | 'DROPOFF' | 'CHARGING';
-  status: string;
-  metadata?: any;
-}
-
-// Grid cell values (match backend)
-// 0=AISLE, 1=STORAGE, 2=BLOCKED(wall), 3=CHARGING
-export type LayoutGrid = number[][];
-
-interface SimulationState {
-  appStatus: AppStatus;
-  warehouseConfig: WarehouseConfig;
-  stats: WarehouseStats;
-  agvs: AGVData[];
-  logs: LogEntry[];
-  inventory: InventoryItem[];
-  slots: SlotData[];
-  layoutGrid: LayoutGrid | null;  // Static map matrix from backend
-  availableWarehouses: any[]; // List for selection
-  lastError: string | null;
-
-  // Actions
-  addLog: (message: string, type: LogType) => void;
-  updateAGVStatus: (id: string, updates: Partial<AGVData>) => void;
-  clearError: () => void;
-
-  // Logic
-  checkImportFeasibility: (size: number) => boolean;
-  importGoods: (itemId: string, quantity: number) => Promise<string | null>;
-  exportGoods: (itemId: string) => boolean;
-  updateAGVPosition: (id: string, x: number, y: number, status: AGVData['status']) => void;
-
-  loadWarehouse: (id: string) => Promise<void>;
-  createWarehouse: (config: Omit<WarehouseConfig, 'id' | 'code'>, initialAgvCount: number) => Promise<void>;
-  fetchAvailableWarehouses: () => Promise<void>;
-  resetSimulation: () => void;
-}
+// Re-export types để các file cũ import từ đây vẫn hoạt động
+export type { LogType, AppStatus, LogEntry, AGVData, WarehouseStats, WarehouseConfig, InventoryItem, SlotData, LayoutGrid, SimulationState } from './types';
+export { API_MASTER_DATA, API_INBOUND } from './api';
 
 export const generateId = () => Math.random().toString(36).substring(2, 9).toUpperCase();
-
-const API_BASE = 'http://localhost:3000/api/master-data';
 
 export const useSimulationStore = create<SimulationState>((set, get) => ({
   appStatus: 'setup',
@@ -147,7 +62,7 @@ export const useSimulationStore = create<SimulationState>((set, get) => ({
 
     try {
       // 1. Tạo Inbound Order qua API Backend
-      const res = await fetch(`${API_BASE}/inbound`, {
+      const res = await fetch(`${API_INBOUND}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -213,7 +128,7 @@ export const useSimulationStore = create<SimulationState>((set, get) => ({
     set({ appStatus: 'loading', lastError: null });
     try {
       // Fetch warehouse (includes layout_data)
-      const whRes = await fetch(`${API_BASE}/warehouses/${id}`);
+      const whRes = await fetch(`${API_MASTER_DATA}/warehouses/${id}`);
       if (!whRes.ok) {
         const errData = await whRes.json();
         throw new Error(errData.message || `Warehouse not found (${id})`);
@@ -221,13 +136,13 @@ export const useSimulationStore = create<SimulationState>((set, get) => ({
       const warehouse = await whRes.json();
 
       // Fetch functional slots
-      const slotsRes = await fetch(`${API_BASE}/warehouses/${id}/slots`);
+      const slotsRes = await fetch(`${API_MASTER_DATA}/warehouses/${id}/slots`);
       const slots = await slotsRes.json();
 
       const storageCount = slots.filter((s: SlotData) => s.slot_type === 'STORAGE').length;
 
       // 3. Fetch AGVs
-      const agvRes = await fetch(`${API_BASE}/warehouses/${warehouse.id}/agvs`);
+      const agvRes = await fetch(`${API_MASTER_DATA}/warehouses/${warehouse.id}/agvs`);
       const agvsDb = await agvRes.json();
       const mappedAgvs = agvsDb.map((a: any) => ({
         id: a.id,
@@ -267,7 +182,7 @@ export const useSimulationStore = create<SimulationState>((set, get) => ({
       const code = `WH-${generateId()}`;
 
       // 1. Call Backend to create warehouse (returns warehouse with layout_data)
-      const res = await fetch(`${API_BASE}/warehouses`, {
+      const res = await fetch(`${API_MASTER_DATA}/warehouses`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -287,14 +202,14 @@ export const useSimulationStore = create<SimulationState>((set, get) => ({
       const warehouse = await res.json();
 
       // 2. Fetch the functional slots
-      const slotsRes = await fetch(`${API_BASE}/warehouses/${warehouse.id}/slots`);
+      const slotsRes = await fetch(`${API_MASTER_DATA}/warehouses/${warehouse.id}/slots`);
       const slots: SlotData[] = await slotsRes.json();
 
       const storageCount = slots.filter(s => s.slot_type === 'STORAGE').length;
       const chargingSlots = slots.filter(s => s.slot_type === 'CHARGING');
 
       // 3. Fetch AGVs that were spawned by backend
-      const agvRes = await fetch(`${API_BASE}/warehouses/${warehouse.id}/agvs`);
+      const agvRes = await fetch(`${API_MASTER_DATA}/warehouses/${warehouse.id}/agvs`);
       const agvsDb = await agvRes.json();
       const mappedAgvs = agvsDb.map((a: any) => ({
         id: a.id,
@@ -329,7 +244,7 @@ export const useSimulationStore = create<SimulationState>((set, get) => ({
 
   fetchAvailableWarehouses: async () => {
     try {
-      const res = await fetch(`${API_BASE}/warehouses`);
+      const res = await fetch(`${API_MASTER_DATA}/warehouses`);
       if (res.ok) {
         const data = await res.json();
         set({ availableWarehouses: data });
