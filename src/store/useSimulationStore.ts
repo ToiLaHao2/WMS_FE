@@ -29,6 +29,7 @@ export const useSimulationStore = create<SimulationState>((set, get) => ({
   layoutGrid: null,
   availableWarehouses: [],
   lastError: null,
+  inboundQueue: [],
 
   addLog: (message, type) =>
     set((state) => ({
@@ -45,22 +46,78 @@ export const useSimulationStore = create<SimulationState>((set, get) => ({
       agvs: state.agvs.map((agv) => (agv.id === id ? { ...agv, ...updates } : agv)),
     })),
 
+  reserveSlots: (allocatedSlots) =>
+    set((state) => {
+      const newSlots = [...state.slots];
+      if (allocatedSlots && Array.isArray(allocatedSlots)) {
+        allocatedSlots.forEach((allocSlot: any) => {
+          const slotIndex = newSlots.findIndex(slot => slot.x === allocSlot.x && slot.y === allocSlot.y);
+          if (slotIndex !== -1) {
+            newSlots[slotIndex] = { ...newSlots[slotIndex], status: 'RESERVED' };
+          }
+        });
+      }
+      return { slots: newSlots };
+    }),
+
   checkImportFeasibility: (size) => {
     const { stats } = get();
     return stats.usedCapacity + size <= stats.totalCapacity;
   },
 
-  updateAGVPosition: (id, x, y, status) => set(state => ({
-    agvs: state.agvs.map(agv =>
-      agv.id === id ? { ...agv, x, y, status: status as AGVData['status'] } : agv
-    )
-  })),
+  updateAGVPosition: (id, x, y, status) => set(state => {
+    let newQueue = state.inboundQueue;
+    let newSlots = state.slots;
+    let isCarryingUpdate: boolean | undefined;
+
+    // Khi action là PICK_UP, xoá package ở vị trí của AGV khỏi bến
+    if (status === 'PICK_UP') {
+      isCarryingUpdate = true;
+      newQueue = state.inboundQueue.filter(pkg => !(pkg.x === x && pkg.y === y));
+    } else if (status === 'DROP_OFF') {
+      isCarryingUpdate = false;
+      // Cập nhật trạng thái của ô lưu trữ thành OCCUPIED
+      newSlots = state.slots.map(slot => 
+        (Number(slot.x) === Number(x) && Number(slot.y) === Number(y) && slot.slot_type === 'STORAGE') 
+          ? { ...slot, status: 'OCCUPIED' } 
+          : slot
+      );
+    }
+
+    return {
+      inboundQueue: newQueue,
+      slots: newSlots,
+      agvs: state.agvs.map(agv =>
+        agv.id === id ? { 
+          ...agv, 
+          x, 
+          y, 
+          status: status as AGVData['status'],
+          ...(isCarryingUpdate !== undefined ? { isCarrying: isCarryingUpdate } : {})
+        } : agv
+      )
+    };
+  }),
 
   importGoods: async (itemId: string, quantity: number) => {
     const state = get();
     state.addLog(`Đang gửi yêu cầu nhập hàng: ${itemId} (Số lượng: ${quantity})...`, 'info');
 
     try {
+      // Tìm vị trí INBOUND trống (có giá trị tile = 4)
+      const inboundCells: {x: number, y: number}[] = [];
+      if (state.layoutGrid) {
+        state.layoutGrid.forEach((row, r) => {
+          row.forEach((cell, c) => {
+            if (cell === 4) inboundCells.push({ x: c, y: r });
+          });
+        });
+      }
+      
+      const emptyInbound = inboundCells.find(c => 
+        !state.inboundQueue.some(pkg => pkg.x === c.x && pkg.y === c.y)
+      ) || inboundCells[0] || { x: 1, y: 1 };
+
       // 1. Tạo Inbound Order qua API Backend
       const res = await fetch(`${API_INBOUND}`, {
         method: 'POST',
@@ -68,7 +125,7 @@ export const useSimulationStore = create<SimulationState>((set, get) => ({
         body: JSON.stringify({
           warehouse_id: state.warehouseConfig?.id,
           code: `IN-${Date.now()}`,
-          items: [{ product_id: itemId, quantity: quantity }]
+          items: [{ product_id: itemId, quantity: quantity, pickup_x: emptyInbound.x, pickup_y: emptyInbound.y }]
         })
       });
 
@@ -77,6 +134,21 @@ export const useSimulationStore = create<SimulationState>((set, get) => ({
       }
 
       state.addLog(`Nhận yêu cầu nhập hàng thành công! Đang chờ AGV xử lý...`, 'success');
+      
+      const data = await res.json();
+      
+      // Đẩy hộp hàng vào queue để hiển thị trên bản đồ
+      set(s => {
+        return {
+          inboundQueue: [...s.inboundQueue, {
+            id: `PKG-${Date.now()}`,
+            x: emptyInbound.x,
+            y: emptyInbound.y,
+            code: itemId
+          }]
+        };
+      });
+
       return itemId;
     } catch (err: any) {
       state.addLog(`Lỗi nhập hàng: ${err.message}`, 'error');

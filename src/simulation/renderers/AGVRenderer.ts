@@ -25,12 +25,18 @@ export class AGVRenderer {
       const ct = this.scene.add.container(sx, sy);
 
       const body = this.scene.add.rectangle(0, 0, 28, 28, col).setStrokeStyle(2, 0x0a0f1a);
+      
+      // Hộp hàng thu nhỏ trên lưng AGV (mặc định ẩn)
+      const carryBox = this.scene.add.rectangle(0, 0, 16, 16, 0x8b5a2b).setStrokeStyle(1, 0x5c3a21);
+      carryBox.setVisible(agv.isCarrying === true);
+
       ct.add([
         this.scene.add.rectangle(0, -13, 20, 5, 0x0a0f1a),
         this.scene.add.rectangle(0, 13, 20, 5, 0x0a0f1a),
         body,
         this.scene.add.rectangle(13, 0, 4, 14, 0x22d3ee),
         this.scene.add.circle(-10, -10, 3, 0xef4444),
+        carryBox // Hộp hàng được add vào cuối cùng để nổi lên trên
       ]);
 
       const id = agv.id.split('-')[1] || '??';
@@ -62,6 +68,12 @@ export class AGVRenderer {
         const col = agv.status === 'moving' ? 0x10b981 : agv.status === 'charging' ? 0xf59e0b : 0x3b82f6;
         const body = sprite.container.list[2] as Phaser.GameObjects.Rectangle;
         if (body) body.setFillStyle(col);
+
+        // Cập nhật hiển thị hộp hàng trên lưng AGV
+        const carryBox = sprite.container.list[5] as Phaser.GameObjects.Rectangle;
+        if (carryBox) {
+          carryBox.setVisible(agv.isCarrying === true);
+        }
 
         sprite.label.setBackgroundColor(col === 0x10b981 ? '#059669' : col === 0xf59e0b ? '#d97706' : '#2563eb');
 

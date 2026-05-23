@@ -23,16 +23,34 @@ export const COL_RACK_A = 0x374f6e; // Rack variant A (cool blue-grey)
 export const COL_RACK_B = 0x2d5a4c; // Rack variant B (teal-green)
 export const COL_RACK_C = 0x5a3d2d; // Rack variant C (warm brown)
 export const COL_RACK_BRD = 0x0f1b2d; // Rack border
+
+// Slot status colors
+export const COL_SLOT_AVAILABLE = 0x5b8def; // True blue (low green) — slot trống
+export const COL_SLOT_AVAILABLE_HI = 0x7ba8ff; // Lighter blue for inner highlight
+export const COL_SLOT_OCCUPIED = 0x16a34a;  // Dark emerald green — slot có hàng
+export const COL_SLOT_OCCUPIED_HI = 0x22c55e;  // Lighter green for inner highlight
+export const COL_SLOT_RESERVED = 0xfbbf24;  // Yellow-amber — slot đang được đặt trước
+export const COL_SLOT_RESERVED_HI = 0xfcd34d; // Lighter amber for inner highlight
 export const COL_CHARGING = 0x1e3a8a; // Charging station base (deep blue)
 export const COL_CHARGE_ICON = 0x60a5fa; // Icon color (bright blue)
 export const COL_INBOUND = 0xef4444; // Red for IN
 export const COL_OUTBOUND = 0x10b981; // Green for OUT
+
+// Slot data interface (minimal, matches store SlotData)
+interface SlotInfo {
+  x: number;
+  y: number;
+  status: string;
+  slot_type: string;
+}
 
 export class GridRenderer {
   private scene: Phaser.Scene;
   private graphics: Phaser.GameObjects.Graphics[] = [];
   private texts: Phaser.GameObjects.Text[] = [];
   public slotCoordinates: Map<string, { x: number, y: number }> = new Map();
+  private slotStatusMap: Map<string, string> = new Map(); // key: "r,c" -> status
+  private slotRects: Map<string, Phaser.GameObjects.Rectangle[]> = new Map(); // for live updates
 
   constructor(scene: Phaser.Scene) {
     this.scene = scene;
@@ -46,7 +64,47 @@ export class GridRenderer {
     this.slotCoordinates.clear();
   }
 
-  public render(grid: number[][], cols: number, rows: number) {
+  /**
+   * Build a lookup map: grid coordinate "row,col" -> slot status
+   */
+  private buildSlotStatusMap(slots: SlotInfo[]) {
+    this.slotStatusMap.clear();
+    for (const slot of slots) {
+      if (slot.slot_type === 'STORAGE') {
+        this.slotStatusMap.set(`${slot.y},${slot.x}`, slot.status);
+      }
+    }
+  }
+
+  /**
+   * Get the fill color pair for a storage slot based on its status
+   */
+  private getSlotColors(row: number, col: number): { fill: number; highlight: number } {
+    const status = this.slotStatusMap.get(`${row},${col}`);
+    switch (status) {
+      case 'OCCUPIED':  return { fill: COL_SLOT_OCCUPIED, highlight: COL_SLOT_OCCUPIED_HI };
+      case 'RESERVED':  return { fill: COL_SLOT_RESERVED, highlight: COL_SLOT_RESERVED_HI };
+      case 'AVAILABLE': return { fill: COL_SLOT_AVAILABLE, highlight: COL_SLOT_AVAILABLE_HI };
+      default:          return { fill: COL_SLOT_AVAILABLE, highlight: COL_SLOT_AVAILABLE_HI };
+    }
+  }
+
+  /**
+   * Update slot visuals when slot data changes (live update without full re-render)
+   */
+  public updateSlotStatuses(slots: SlotInfo[]) {
+    this.buildSlotStatusMap(slots);
+    this.slotRects.forEach((rects, key) => {
+      const [r, c] = key.split(',').map(Number);
+      const { fill, highlight } = this.getSlotColors(r, c);
+      // rects[0] = outer fill, rects[1] = inner highlight
+      rects[0].setFillStyle(fill, 1);
+      rects[1].setFillStyle(highlight, 0.6);
+    });
+  }
+
+  public render(grid: number[][], cols: number, rows: number, slots: SlotInfo[] = []) {
+    this.buildSlotStatusMap(slots);
     this.clear();
     const totalW = cols * CELL;
     const totalH = rows * CELL;
@@ -72,9 +130,8 @@ export class GridRenderer {
 
     this.graphics.push(gfxWall, gfxAisle, gfxRack, gfxCharge, gfxDock, gfxTape);
 
-    const rackColors = [COL_RACK_A, COL_RACK_B, COL_RACK_C];
-    let blockIndex = 0;
-    const coloredBlocks = new Map<string, number>();
+    // Rack block colors are no longer used for individual slot coloring.
+    // Colors are now determined by slot status (AVAILABLE/OCCUPIED).
 
     // Calculate Bounding Boxes for Racks and Charging to draw Smart Paths
     let minRackR = rows, maxRackR = 0, minRackC = cols, maxRackC = 0;
@@ -203,34 +260,29 @@ export class GridRenderer {
           const icon = this.scene.add.text(cx, cy, '⚡', { fontSize: '14px', color: '#60a5fa' }).setOrigin(0.5).setDepth(5);
           this.texts.push(icon);
         } else if (tile === GRID_STORAGE) {
-          // Rack coloring by block
-          const cr = r - 2;
-          const cc = c - 2;
-          const blockR = Math.floor(Math.max(0, cr) / 5) * 5 + 2;
-          const blockC = Math.floor(Math.max(0, cc) / 3) * 3 + 2;
-          const blockKey = `${blockR},${blockC}`;
+          // Status-based slot coloring
+          const { fill, highlight } = this.getSlotColors(r, c);
 
-          let color: number;
-          if (coloredBlocks.has(blockKey)) {
-            color = coloredBlocks.get(blockKey)!;
-          } else {
-            color = rackColors[blockIndex % rackColors.length];
-            coloredBlocks.set(blockKey, color);
-            blockIndex++;
-          }
+          // Use GameObjects.Rectangle instead of Graphics for live updates
+          const outer = this.scene.add.rectangle(px + CELL / 2, py + CELL / 2, CELL - 2, CELL - 2, fill, 1);
+          outer.setDepth(2);
+          const inner = this.scene.add.rectangle(px + CELL / 2, py + CELL / 2, CELL - 8, CELL - 8, highlight, 0.6);
+          inner.setDepth(3);
 
-          gfxRack.fillStyle(color, 1);
-          gfxRack.fillRect(px + 1, py + 1, CELL - 2, CELL - 2);
-          gfxRack.fillStyle(color + 0x111111, 0.6);
-          gfxRack.fillRect(px + 4, py + 4, CELL - 8, CELL - 8);
           gfxRack.lineStyle(1, COL_RACK_BRD, 0.8);
           gfxRack.strokeRect(px + 1, py + 1, CELL - 2, CELL - 2);
+
+          // Store references for live update
+          const cellKey = `${r},${c}`;
+          this.slotRects.set(cellKey, [outer, inner]);
 
           // Slot label
           const slotCode = `R${r}-C${c}`;
           this.slotCoordinates.set(slotCode, { x: px + CELL / 2, y: py + CELL / 2 });
 
           // Show label on first cell of each block
+          const cr = r - 2;
+          const cc = c - 2;
           if (Math.max(0, cr) % 5 === 0 && Math.max(0, cc) % 3 === 0) {
             const txt = this.scene.add.text(px + CELL, py + CELL, slotCode, {
               fontSize: '8px',

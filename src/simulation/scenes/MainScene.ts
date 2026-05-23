@@ -2,6 +2,7 @@ import * as Phaser from 'phaser';
 import { useSimulationStore, type LayoutGrid } from '../../store/useSimulationStore';
 import { GridRenderer, CELL, GRID_AISLE, GRID_BLOCKED, GRID_STORAGE } from '../renderers/GridRenderer';
 import { AGVRenderer } from '../renderers/AGVRenderer';
+import { PackageRenderer } from '../renderers/PackageRenderer';
 
 // ────────────────────────────────────────────────────────────────
 // SCENE
@@ -13,6 +14,7 @@ export default class MainScene extends Phaser.Scene {
   
   private gridRenderer!: GridRenderer;
   private agvRenderer!: AGVRenderer;
+  private packageRenderer!: PackageRenderer;
   private inventoryLayer!: Phaser.GameObjects.Container;
   private needsInventoryUpdate = false;
   private unsubscribers: (() => void)[] = [];
@@ -24,7 +26,7 @@ export default class MainScene extends Phaser.Scene {
   preload() { /* assets later */ }
 
   create() {
-    const { warehouseConfig, agvs, layoutGrid } = useSimulationStore.getState();
+    const { warehouseConfig, agvs, layoutGrid, slots, inboundQueue } = useSimulationStore.getState();
     
     // Cleanup subscriptions on shutdown
     this.events.once('shutdown', () => {
@@ -47,10 +49,12 @@ export default class MainScene extends Phaser.Scene {
     // Initialize Renderers
     this.gridRenderer = new GridRenderer(this);
     this.agvRenderer = new AGVRenderer(this);
+    this.packageRenderer = new PackageRenderer(this);
 
     this.buildGrid(layoutGrid);
-    this.gridRenderer.render(this.grid, this.cols, this.rows);
+    this.gridRenderer.render(this.grid, this.cols, this.rows, slots);
     this.agvRenderer.spawnAGVs(agvs, this.cols, this.rows);
+    this.packageRenderer.syncPackages(inboundQueue);
     
     // Setup Inventory visuals
     this.inventoryLayer = this.add.container(0, 0);
@@ -76,7 +80,19 @@ export default class MainScene extends Phaser.Scene {
         this.agvRenderer.syncAGVs(state.agvs);
       }
     });
-    this.unsubscribers.push(unsubInv, unsubAgv);
+    // Subscribe to slot status changes — live update kệ trống/có hàng
+    const unsubSlots = useSimulationStore.subscribe((state, prevState) => {
+      if (state.slots !== prevState.slots) {
+        this.gridRenderer.updateSlotStatuses(state.slots);
+      }
+    });
+    // Subscribe to inbound queue
+    const unsubInbound = useSimulationStore.subscribe((state, prevState) => {
+      if (state.inboundQueue !== prevState.inboundQueue) {
+        this.packageRenderer.syncPackages(state.inboundQueue);
+      }
+    });
+    this.unsubscribers.push(unsubInv, unsubAgv, unsubSlots, unsubInbound);
 
     this.setupControls();
   }

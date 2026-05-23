@@ -25,6 +25,11 @@ export function useAGVSocket() {
       updateAGVPosition(data.agv_id, data.x, data.y, data.action);
     });
 
+    socket.on('slot_allocated', (data) => {
+      // Dữ liệu từ Worker: { order_id, slots: [{ slot_id, x, y }] }
+      useSimulationStore.getState().reserveSlots(data.slots);
+    });
+
     socket.on('connect_error', (err) => {
       console.error('Socket connection error:', err);
     });

@@ -13,11 +13,12 @@ export interface LogEntry {
 export interface AGVData {
   [x: string]: ReactNode;
   id: string;
-  status: 'idle' | 'moving' | 'charging';
+  status: 'idle' | 'moving' | 'charging' | string;
   battery: number;
   x: number;
   y: number;
   currentTask: string | null;
+  isCarrying?: boolean;
 }
 
 export interface WarehouseStats {
@@ -59,6 +60,13 @@ export interface SlotData {
 // 0=AISLE, 1=STORAGE, 2=BLOCKED(wall), 3=CHARGING
 export type LayoutGrid = number[][];
 
+export interface InboundPackage {
+  id: string;
+  x: number;
+  y: number;
+  code: string;
+}
+
 export interface SimulationState {
   appStatus: AppStatus;
   warehouseConfig: WarehouseConfig;
@@ -70,10 +78,13 @@ export interface SimulationState {
   layoutGrid: LayoutGrid | null;  // Static map matrix from backend
   availableWarehouses: any[]; // List for selection
   lastError: string | null;
+  inboundQueue: InboundPackage[]; // Queue chờ ở khu vực Inbound
 
   // Actions
   addLog: (message: string, type: LogType) => void;
   updateAGVStatus: (id: string, updates: Partial<AGVData>) => void;
+  reserveSlots: (allocatedSlots: any[]) => void;
+  checkImportFeasibility: (size: number) => boolean;
   clearError: () => void;
 
   // Logic
