@@ -3,16 +3,16 @@ import { useSimulationStore } from '../../store/useSimulationStore';
 import { Box, Factory, LogIn, Plus } from 'lucide-react';
 
 const OnboardingPage: React.FC = () => {
-  const { 
-    loadWarehouse, 
-    createWarehouse, 
-    lastError, 
-    clearError, 
-    availableWarehouses, 
-    fetchAvailableWarehouses 
+  const {
+    loadWarehouse,
+    createWarehouse,
+    lastError,
+    clearError,
+    availableWarehouses,
+    fetchAvailableWarehouses
   } = useSimulationStore();
   const [tab, setTab] = useState<'load' | 'create'>('load');
-  
+
   // Structured Form States
   const [loadForm, setLoadForm] = useState({ targetCode: '' });
   const [createForm, setCreateForm] = useState({
@@ -27,7 +27,7 @@ const OnboardingPage: React.FC = () => {
 
   // 1. Instant Local Filter (Derived State)
   const filteredWarehouses = React.useMemo(() => {
-    return availableWarehouses.filter(wh => 
+    return availableWarehouses.filter(wh =>
       wh.code.toLowerCase().includes(loadForm.targetCode.toLowerCase())
     );
   }, [availableWarehouses, loadForm.targetCode]);
@@ -101,7 +101,7 @@ const OnboardingPage: React.FC = () => {
   return (
     <div className="w-screen h-screen bg-slate-900 flex items-center justify-center p-4">
       <div className="max-w-4xl w-full grid grid-cols-1 md:grid-cols-2 gap-8 items-center">
-        
+
         {/* Left Side: Branding / Info */}
         <div className="hidden md:flex flex-col gap-6 text-slate-300">
           <div className="flex items-center gap-3 text-emerald-400">
@@ -129,17 +129,15 @@ const OnboardingPage: React.FC = () => {
           {/* Tabs */}
           <div className="flex border-b border-slate-700">
             <button
-              className={`flex-1 py-4 text-sm font-medium transition-colors ${
-                tab === 'load' ? 'bg-emerald-500/10 text-emerald-400 border-b-2 border-emerald-500' : 'text-slate-400 hover:bg-slate-700/50'
-              }`}
+              className={`flex-1 py-4 text-sm font-medium transition-colors ${tab === 'load' ? 'bg-emerald-500/10 text-emerald-400 border-b-2 border-emerald-500' : 'text-slate-400 hover:bg-slate-700/50'
+                }`}
               onClick={() => setTab('load')}
             >
               Load Existing
             </button>
             <button
-              className={`flex-1 py-4 text-sm font-medium transition-colors ${
-                tab === 'create' ? 'bg-cyan-500/10 text-cyan-400 border-b-2 border-cyan-500' : 'text-slate-400 hover:bg-slate-700/50'
-              }`}
+              className={`flex-1 py-4 text-sm font-medium transition-colors ${tab === 'create' ? 'bg-cyan-500/10 text-cyan-400 border-b-2 border-cyan-500' : 'text-slate-400 hover:bg-slate-700/50'
+                }`}
               onClick={() => setTab('create')}
             >
               Create New
@@ -153,10 +151,9 @@ const OnboardingPage: React.FC = () => {
                   <div className="flex items-center justify-between">
                     <label className="text-sm font-medium text-slate-300">Warehouse ID</label>
                     {searchStatus !== 'idle' && (
-                      <span className={`text-[10px] font-bold uppercase tracking-widest flex items-center gap-1 ${
-                        searchStatus === 'checking' ? 'text-slate-500' :
-                        searchStatus === 'taken' ? 'text-amber-500' : 'text-emerald-500'
-                      }`}>
+                      <span className={`text-[10px] font-bold uppercase tracking-widest flex items-center gap-1 ${searchStatus === 'checking' ? 'text-slate-500' :
+                          searchStatus === 'taken' ? 'text-amber-500' : 'text-emerald-500'
+                        }`}>
                         {searchStatus === 'checking' && <span className="w-2 h-2 rounded-full bg-slate-500 animate-pulse" />}
                         {searchStatus === 'taken' && <Box size={10} />}
                         {searchStatus === 'available' && <Plus size={10} />}
@@ -169,11 +166,10 @@ const OnboardingPage: React.FC = () => {
                     value={loadForm.targetCode}
                     onChange={(e) => setLoadForm({ ...loadForm, targetCode: e.target.value })}
                     placeholder="e.g. WH-XYZ123"
-                    className={`w-full bg-slate-900 border rounded-lg px-4 py-3 text-slate-200 focus:outline-none focus:ring-2 transition-all ${
-                      searchStatus === 'taken' ? 'border-amber-500/50 focus:ring-amber-500' :
-                      searchStatus === 'available' ? 'border-emerald-500/50 focus:ring-emerald-500' :
-                      'border-slate-700 focus:ring-emerald-500'
-                    }`}
+                    className={`w-full bg-slate-900 border rounded-lg px-4 py-3 text-slate-200 focus:outline-none focus:ring-2 transition-all ${searchStatus === 'taken' ? 'border-amber-500/50 focus:ring-amber-500' :
+                        searchStatus === 'available' ? 'border-emerald-500/50 focus:ring-emerald-500' :
+                          'border-slate-700 focus:ring-emerald-500'
+                      }`}
                     required
                   />
                 </div>
@@ -205,11 +201,10 @@ const OnboardingPage: React.FC = () => {
                           key={wh.id}
                           type="button"
                           onClick={() => setLoadForm({ targetCode: wh.code })}
-                          className={`flex items-center justify-between p-3 rounded-lg border transition-all text-left group ${
-                            loadForm.targetCode === wh.code 
-                              ? 'bg-emerald-500/10 border-emerald-500/50 text-emerald-400' 
+                          className={`flex items-center justify-between p-3 rounded-lg border transition-all text-left group ${loadForm.targetCode === wh.code
+                              ? 'bg-emerald-500/10 border-emerald-500/50 text-emerald-400'
                               : 'bg-slate-900/50 border-slate-700 hover:border-slate-500 text-slate-400'
-                          }`}
+                            }`}
                         >
                           <div className="flex items-center gap-3">
                             <div className={`p-2 rounded-md ${loadForm.targetCode === wh.code ? 'bg-emerald-500 text-white' : 'bg-slate-800 group-hover:bg-slate-700'}`}>
@@ -255,7 +250,7 @@ const OnboardingPage: React.FC = () => {
                     />
                   </div>
                 </div>
-                
+
                 <div className="space-y-2">
                   <label className="text-sm font-medium text-slate-300">Layout Pattern</label>
                   <select

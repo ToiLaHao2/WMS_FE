@@ -69,6 +69,7 @@ export const useSimulationStore = create<SimulationState>((set, get) => ({
     let newQueue = state.inboundQueue;
     let newSlots = state.slots;
     let isCarryingUpdate: boolean | undefined;
+    let displayStatus = status;
 
     // Khi action là PICK_UP, xoá package ở vị trí của AGV khỏi bến
     if (status === 'PICK_UP') {
@@ -77,22 +78,26 @@ export const useSimulationStore = create<SimulationState>((set, get) => ({
     } else if (status === 'DROP_OFF') {
       isCarryingUpdate = false;
       // Cập nhật trạng thái của ô lưu trữ thành OCCUPIED
-      newSlots = state.slots.map(slot => 
-        (Number(slot.x) === Number(x) && Number(slot.y) === Number(y) && slot.slot_type === 'STORAGE') 
-          ? { ...slot, status: 'OCCUPIED' } 
+      newSlots = state.slots.map(slot =>
+        (Number(slot.x) === Number(x) && Number(slot.y) === Number(y) && slot.slot_type === 'STORAGE')
+          ? { ...slot, status: 'OCCUPIED' }
           : slot
       );
+    } else if (status === 'RETURN') {
+      // AGV đang quay về dock, không mang hàng
+      isCarryingUpdate = false;
+      displayStatus = 'idle';
     }
 
     return {
       inboundQueue: newQueue,
       slots: newSlots,
       agvs: state.agvs.map(agv =>
-        agv.id === id ? { 
-          ...agv, 
-          x, 
-          y, 
-          status: status as AGVData['status'],
+        agv.id === id ? {
+          ...agv,
+          x,
+          y,
+          status: displayStatus as AGVData['status'],
           ...(isCarryingUpdate !== undefined ? { isCarrying: isCarryingUpdate } : {})
         } : agv
       )
@@ -105,7 +110,7 @@ export const useSimulationStore = create<SimulationState>((set, get) => ({
 
     try {
       // Tìm vị trí INBOUND trống (có giá trị tile = 4)
-      const inboundCells: {x: number, y: number}[] = [];
+      const inboundCells: { x: number, y: number }[] = [];
       if (state.layoutGrid) {
         state.layoutGrid.forEach((row, r) => {
           row.forEach((cell, c) => {
@@ -113,8 +118,8 @@ export const useSimulationStore = create<SimulationState>((set, get) => ({
           });
         });
       }
-      
-      const emptyInbound = inboundCells.find(c => 
+
+      const emptyInbound = inboundCells.find(c =>
         !state.inboundQueue.some(pkg => pkg.x === c.x && pkg.y === c.y)
       ) || inboundCells[0] || { x: 1, y: 1 };
 
@@ -134,9 +139,7 @@ export const useSimulationStore = create<SimulationState>((set, get) => ({
       }
 
       state.addLog(`Nhận yêu cầu nhập hàng thành công! Đang chờ AGV xử lý...`, 'success');
-      
-      const data = await res.json();
-      
+
       // Đẩy hộp hàng vào queue để hiển thị trên bản đồ
       set(s => {
         return {
