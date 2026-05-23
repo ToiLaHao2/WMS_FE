@@ -88,7 +88,6 @@ export interface SimulationState {
   clearError: () => void;
 
   // Logic
-  checkImportFeasibility: (size: number) => boolean;
   importGoods: (itemId: string, quantity: number) => Promise<string | null>;
   exportGoods: (itemId: string) => boolean;
   updateAGVPosition: (id: string, x: number, y: number, status: AGVData['status']) => void;
