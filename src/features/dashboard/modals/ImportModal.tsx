@@ -183,7 +183,14 @@ const ImportModal: React.FC<ImportModalProps> = ({ onClose }) => {
               )}
 
               <div className="space-y-1">
-                <label className="text-xs font-medium text-slate-400">Số Lượng</label>
+                <div className="flex justify-between items-center">
+                  <label className="text-xs font-medium text-slate-400">Số Lượng</label>
+                  {availableSlots !== null && (
+                    <span className="text-xs text-emerald-400">
+                      (Còn {availableSlots} slot trống)
+                    </span>
+                  )}
+                </div>
                 <input
                   type="number"
                   min="1"
