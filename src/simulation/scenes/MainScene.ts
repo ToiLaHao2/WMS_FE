@@ -94,6 +94,11 @@ export default class MainScene extends Phaser.Scene {
     });
     this.unsubscribers.push(unsubInv, unsubAgv, unsubSlots, unsubInbound);
 
+    this.events.once('destroy', () => {
+      this.unsubscribers.forEach(unsub => unsub());
+      this.unsubscribers = [];
+    });
+
     this.setupControls();
   }
 
