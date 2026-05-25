@@ -12,6 +12,9 @@ export const GRID_BLOCKED = 2;
 export const GRID_CHARGING = 3;
 export const GRID_INBOUND = 4;
 export const GRID_OUTBOUND = 5;
+export const GRID_EMPTY = 6;
+export const GRID_AISLE_H = 7;
+export const GRID_AISLE_V = 8;
 
 // Palette
 export const COL_BG = 0x0c1222; // Deep navy background
@@ -201,13 +204,13 @@ export class GridRenderer {
         if (tile === GRID_BLOCKED) {
           gfxWall.fillStyle(COL_WALL, 1);
           gfxWall.fillRect(px, py, CELL, CELL);
-        } else if (tile === GRID_AISLE) {
+        } else if (tile === GRID_AISLE || tile === GRID_EMPTY || tile === GRID_AISLE_H || tile === GRID_AISLE_V) {
           gfxAisle.fillStyle(COL_AISLE, 1);
           gfxAisle.fillRect(px, py, CELL, CELL);
         }
 
-        // Draw NavMesh paths (even on EMPTY tiles if they are branches)
-        if (tile === GRID_AISLE || tile === 0) { // 0 is GRID_EMPTY
+        // Draw NavMesh paths
+        if (tile === GRID_AISLE || tile === GRID_AISLE_H || tile === GRID_AISLE_V) {
           if (isHPath || isVPath) {
             const cx = px + CELL / 2;
             const cy = py + CELL / 2;

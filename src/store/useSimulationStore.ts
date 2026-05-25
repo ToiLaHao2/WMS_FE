@@ -1,10 +1,10 @@
 import { create } from 'zustand';
 import type { SimulationState, AGVData, LogType, SlotData } from './types';
-import { API_MASTER_DATA, API_INBOUND } from './api';
+import { API_MASTER_DATA, API_INBOUND, API_AGV } from './api';
 
 // Re-export types để các file cũ import từ đây vẫn hoạt động
 export type { LogType, AppStatus, LogEntry, AGVData, WarehouseStats, WarehouseConfig, InventoryItem, SlotData, LayoutGrid, SimulationState } from './types';
-export { API_MASTER_DATA, API_INBOUND } from './api';
+export { API_MASTER_DATA, API_INBOUND, API_AGV } from './api';
 
 export const generateId = () => Math.random().toString(36).substring(2, 9).toUpperCase();
 
@@ -217,7 +217,7 @@ export const useSimulationStore = create<SimulationState>((set, get) => ({
       const storageCount = slots.filter((s: SlotData) => s.slot_type === 'STORAGE').length;
 
       // 3. Fetch AGVs
-      const agvRes = await fetch(`${API_MASTER_DATA}/warehouses/${warehouse.id}/agvs`);
+      const agvRes = await fetch(`${API_AGV}/warehouses/${warehouse.id}/agvs`);
       const agvsDb = await agvRes.json();
       const mappedAgvs = agvsDb.map((a: any) => ({
         id: a.id,
@@ -284,7 +284,7 @@ export const useSimulationStore = create<SimulationState>((set, get) => ({
       const chargingSlots = slots.filter(s => s.slot_type === 'CHARGING');
 
       // 3. Fetch AGVs that were spawned by backend
-      const agvRes = await fetch(`${API_MASTER_DATA}/warehouses/${warehouse.id}/agvs`);
+      const agvRes = await fetch(`${API_AGV}/warehouses/${warehouse.id}/agvs`);
       const agvsDb = await agvRes.json();
       const mappedAgvs = agvsDb.map((a: any) => ({
         id: a.id,

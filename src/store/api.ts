@@ -2,3 +2,4 @@
 export const API_MASTER_DATA = 'http://localhost:3000/api/master-data';
 export const API_INBOUND = 'http://localhost:3000/api/inbound';
 export const API_OUTBOUND = 'http://localhost:3000/api/outbound';
+export const API_AGV = 'http://localhost:3000/api/agv';
