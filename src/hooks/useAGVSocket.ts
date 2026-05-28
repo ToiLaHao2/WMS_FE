@@ -1,8 +1,7 @@
 import { useEffect } from 'react';
 import { io } from 'socket.io-client';
 import { useSimulationStore } from '../store/useSimulationStore';
-
-const SOCKET_URL = 'http://localhost:3001';
+import { SOCKET_URL } from '../store/api';
 
 export function useAGVSocket() {
   const { updateAGVPosition, addLog } = useSimulationStore();

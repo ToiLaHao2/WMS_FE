@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useSimulationStore } from '../../store/useSimulationStore';
+import { API_MASTER_DATA } from '../../store/api';
 import { Box, Factory, LogIn, Plus } from 'lucide-react';
 
 const OnboardingPage: React.FC = () => {
@@ -50,7 +51,7 @@ const OnboardingPage: React.FC = () => {
     const timer = setTimeout(async () => {
       setSearchStatus('checking');
       try {
-        const res = await fetch(`http://localhost:3000/api/master-data/warehouses/check/${code}`);
+        const res = await fetch(`${API_MASTER_DATA}/warehouses/check/${code}`);
         const { exists } = await res.json();
         setSearchStatus(exists ? 'taken' : 'available');
       } catch (err) {
