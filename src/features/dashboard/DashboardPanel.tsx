@@ -5,7 +5,7 @@ import ImportModal from './modals/ImportModal';
 import ExportModal from './modals/ExportModal';
 
 const DashboardPanel: React.FC = () => {
-  const { stats, agvs, logs, inventory } = useSimulationStore();
+  const { stats, agvs, logs, inventory, slots } = useSimulationStore();
   
   const [isImportOpen, setIsImportOpen] = useState(false);
   const [isExportOpen, setIsExportOpen] = useState(false);
@@ -58,13 +58,17 @@ const DashboardPanel: React.FC = () => {
             <div className="flex justify-between items-end mb-2">
               <span className="text-sm text-slate-400">Capacity Used</span>
               <span className="text-lg font-bold text-slate-200">
-                {stats.usedCapacity} / {stats.totalCapacity}
+                {slots.filter(s => s.status === 'RESERVED' || s.status === 'OCCUPIED').length} / {slots.filter(s => s.slot_type === 'STORAGE').length || stats.totalCapacity}
               </span>
             </div>
             <div className="w-full bg-slate-700 h-2 rounded-full overflow-hidden">
               <div
                 className="bg-gradient-to-r from-emerald-400 to-cyan-400 h-full rounded-full transition-all duration-500"
-                style={{ width: `${(stats.usedCapacity / stats.totalCapacity) * 100}%` }}
+                style={{ 
+                  width: `${slots.filter(s => s.slot_type === 'STORAGE').length > 0 
+                    ? (slots.filter(s => s.status === 'RESERVED' || s.status === 'OCCUPIED').length / slots.filter(s => s.slot_type === 'STORAGE').length) * 100 
+                    : 0}%` 
+                }}
               />
             </div>
           </div>

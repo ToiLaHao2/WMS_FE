@@ -3,7 +3,7 @@ import { useSimulationStore } from '../../store/useSimulationStore';
 import { BarChart3, Battery, Package, Truck, Zap } from 'lucide-react';
 
 const StatsSidebar: React.FC = () => {
-  const { agvs, slots, inventory } = useSimulationStore();
+  const { agvs, slots } = useSimulationStore();
 
   const activeAgvs = agvs.filter(a => a.status === 'moving').length;
   const avgBattery = agvs.length > 0 
@@ -11,7 +11,7 @@ const StatsSidebar: React.FC = () => {
     : 0;
 
   const storageSlots = slots.filter(s => s.slot_type === 'STORAGE').length;
-  const occupiedSlots = inventory.length;
+  const occupiedSlots = slots.filter(s => s.status === 'RESERVED' || s.status === 'OCCUPIED').length;
   const occupancyRate = storageSlots > 0 ? Math.round((occupiedSlots / storageSlots) * 100) : 0;
 
   return (

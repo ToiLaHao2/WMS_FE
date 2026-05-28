@@ -65,6 +65,18 @@ export const useSimulationStore = create<SimulationState>((set, get) => ({
     return stats.usedCapacity + size <= stats.totalCapacity;
   },
 
+  addInboundPackage: (pkg) =>
+    set((state) => {
+      if (state.inboundQueue.some(p => p.id === pkg.id)) return state;
+      return { inboundQueue: [...state.inboundQueue, pkg] };
+    }),
+
+  addInventoryItem: (item) =>
+    set((state) => {
+      if (state.inventory.some(i => i.id === item.id)) return state;
+      return { inventory: [...state.inventory, item] };
+    }),
+
   updateAGVPosition: (id, x, y, status) => set(state => {
     let newQueue = state.inboundQueue;
     let newSlots = state.slots;

@@ -24,9 +24,20 @@ export function useAGVSocket() {
       updateAGVPosition(data.agv_id, data.x, data.y, data.action);
     });
 
+    socket.on('inbound_created', (data) => {
+      // Dữ liệu từ Worker: { id, x, y, code }
+      useSimulationStore.getState().addInboundPackage(data);
+    });
+
     socket.on('slot_allocated', (data) => {
       // Dữ liệu từ Worker: { order_id, slots: [{ slot_id, x, y }] }
       useSimulationStore.getState().reserveSlots(data.slots);
+    });
+
+    socket.on('inventory_added', (item) => {
+      // Khi hàng đã cất thành công lên kệ
+      useSimulationStore.getState().addInventoryItem(item);
+      // Optional: addLog(`Hàng ${item.id} đã cất lên kệ thành công`, 'success');
     });
 
     socket.on('connect_error', (err) => {

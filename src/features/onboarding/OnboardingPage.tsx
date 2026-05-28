@@ -89,10 +89,17 @@ const OnboardingPage: React.FC = () => {
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
-    const { width, height, agvCount } = createForm;
-    if (width > 0 && height > 0 && agvCount >= 0) {
+    let { width, height, agvCount } = createForm;
+    
+    if (agvCount === 0) {
+      alert("Bạn chưa chọn số lượng AGV. Hệ thống sẽ mặc định tạo 1 AGV để đảm bảo kho hoạt động.");
+      agvCount = 1;
+      setCreateForm(prev => ({ ...prev, agvCount: 1 }));
+    }
+
+    if (width > 0 && height > 0 && agvCount > 0) {
       try {
-        await createWarehouse(createForm, createForm.agvCount);
+        await createWarehouse({ ...createForm, width, height }, agvCount);
       } catch (err: any) {
         // Error is now handled via store's lastError
       }

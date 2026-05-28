@@ -89,6 +89,8 @@ export interface SimulationState {
 
   // Logic
   importGoods: (itemId: string, quantity: number) => Promise<string | null>;
+  addInboundPackage: (pkg: InboundPackage) => void;
+  addInventoryItem: (item: InventoryItem) => void;
   exportGoods: (itemId: string) => boolean;
   updateAGVPosition: (id: string, x: number, y: number, status: AGVData['status']) => void;
 
