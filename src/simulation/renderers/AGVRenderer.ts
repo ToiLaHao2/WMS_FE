@@ -87,6 +87,8 @@ export class AGVRenderer {
           const angle = Phaser.Math.Angle.Between(sprite.container.x, sprite.container.y, targetX, targetY);
           sprite.container.setRotation(angle);
 
+          this.scene.tweens.killTweensOf(sprite.container);
+
           this.scene.tweens.add({
             targets: sprite.container,
             x: targetX,
