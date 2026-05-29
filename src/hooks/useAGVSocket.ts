@@ -4,7 +4,7 @@ import { useSimulationStore } from '../store/useSimulationStore';
 import { SOCKET_URL } from '../store/api';
 
 export function useAGVSocket() {
-  const { updateAGVPosition, addLog } = useSimulationStore();
+  const { updateAGVPosition, addLog, warehouseConfig } = useSimulationStore();
 
   useEffect(() => {
     // Kết nối tới Socket.IO server của BE
@@ -17,6 +17,10 @@ export function useAGVSocket() {
     socket.on('connect', () => {
       console.log('✅ Đã kết nối tới Realtime Server (Socket.IO)');
       addLog('Đã kết nối thành công tới máy chủ Realtime.', 'info');
+      
+      if (warehouseConfig?.id) {
+          socket.emit('join_warehouse', warehouseConfig.id);
+      }
     });
 
     socket.on('agv_moved', (data) => {
@@ -51,5 +55,5 @@ export function useAGVSocket() {
     return () => {
       socket.disconnect();
     };
-  }, [updateAGVPosition, addLog]);
+  }, [updateAGVPosition, addLog, warehouseConfig?.id]);
 }
